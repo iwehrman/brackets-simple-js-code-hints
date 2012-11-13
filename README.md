@@ -1,0 +1,2 @@
+brackets-js-code-hints
+======================
