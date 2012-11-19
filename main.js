@@ -28,12 +28,13 @@
 define(function (require, exports, module) {
     "use strict";
 	
-	
     var CodeHintManager         = brackets.getModule("editor/CodeHintManager"),
         DocumentManager         = brackets.getModule("document/DocumentManager"),
         EditorManager           = brackets.getModule("editor/EditorManager"),
         EditorUtils             = brackets.getModule("editor/EditorUtils"),
         AppInit                 = brackets.getModule("utils/AppInit");
+	
+	// var tokens = [];
 	
     function _documentIsJavaScript(doc) {
         return doc && EditorUtils.getModeFromFileExtension(doc.file.fullPath) === "javascript";
@@ -49,8 +50,8 @@ define(function (require, exports, module) {
             return "";
         }
     }
-    
-    function _findAllTokens(editor, userCursor) {
+	
+	function _findAllTokens(editor, userCursor, prefix) {
         var cm = editor._codeMirror;
         var cursor = {ch: 0, line: 0}, t;
         var tokenTable = {};
@@ -74,7 +75,11 @@ define(function (require, exports, module) {
                     // ignore the token currently being typed
                     if (!(userCursor.line === cursor.line && userCursor.ch >= t.start &&
                             userCursor.ch <= t.end)) {
-                        tokenTable[t.string] = true;
+                        
+                        // only return tokens that extend the prefix, ignoring leading delimiters
+                        if ((t.string.indexOf(prefix) === 0) || _isDelimiter(prefix)) {
+                            tokenTable[t.string] = true;
+                        }
                     }
                 }
                 
@@ -91,11 +96,78 @@ define(function (require, exports, module) {
         
         return tokenList;
     }
+    
+    function _isDelimiter(prefix) {
+        return (prefix === "(" || prefix === "[" ||
+					prefix === ":" || prefix === ".");
+    }
+    
+    function _insertCompletionAtCursor(completion, editor, cursor) {
+        var token;
+        var cm = editor._codeMirror;
+        
+        if (_documentIsJavaScript(editor.document)) { // on the off-chance we changed documents, don't change anything
+            token = cm.getTokenAt(cursor);
+            if (token) {
+                
+                // if the token is a delimiter, append the completion; 
+                // otherwise replace the existing token 
+                var offset = 0;
+                if (_isDelimiter(token.string)) {
+                    offset = token.string.length;
+                }
+				                
+                cm.replaceRange(completion,
+                                {line: cursor.line, ch: token.start + offset},
+                                {line: cursor.line, ch: token.end + offset});
+                console.log('token: ' + token.string);
+                console.log('completion: ' + completion);
+            }
+        }
+    }
 	
     /**
      * @constructor
      */
-    function JSHints() {}
+    function JSHints() {
+		this.tokens = {};
+	}
+	
+	JSHints.prototype._initializeTokens = function(editor) {
+        var cm = editor._codeMirror;
+        var cursor = {ch: 0, line: 0}, t;
+        
+        while (cm.getLine(cursor.line) !== undefined) {
+            t = cm.getTokenAt(cursor);
+            if (t.end < cursor.ch) {
+                // We already parsed this token because our cursor is past
+                // the token that codemirror gave us. So, we're at end of line.
+                cursor.line += 1;
+                cursor.ch = 0;
+            } else {
+                // A new token!
+                
+                // console.log(t.className + ":" + t.string);
+                var className = t.className;
+                if (className === "variable" || className === "variable-2" ||
+                        className === "def" || className === "property") {
+                    
+                    // ignore the token currently being typed
+                    if (!(userCursor.line === cursor.line && userCursor.ch >= t.start &&
+                            userCursor.ch <= t.end)) {
+                        
+                        // only return tokens that extend the prefix, ignoring leading delimiters
+                        if ((t.string.indexOf(prefix) === 0) || _isDelimiter(prefix)) {
+                            this.tokens[t.string] = true;
+                        }
+                    }
+                }
+                
+                // Advance to next token (or possibly to the end of the line)
+                cursor.ch = t.end + 1;
+            }
+        }
+    }
 
     /**
      * Filters the source list by query and returns the result
@@ -104,7 +176,6 @@ define(function (require, exports, module) {
      * @return {Array.<string>}
      */
     JSHints.prototype.search = function (query) {
-        console.log(query);
         return query.tokens;
     };
 
@@ -124,7 +195,7 @@ define(function (require, exports, module) {
 
         if (_documentIsJavaScript(editor.document)) {
             queryInfo.queryStr = _findCurrentToken(editor, cursor);
-            queryInfo.tokens = _findAllTokens(editor, cursor);
+            queryInfo.tokens = _findAllTokens(editor, cursor, queryInfo.queryStr);
         }
 
         return queryInfo;
@@ -137,6 +208,7 @@ define(function (require, exports, module) {
      * @param {Cursor} current cursor location
      */
     JSHints.prototype.handleSelect = function (completion, editor, cursor) {
+        _insertCompletionAtCursor(completion, editor, cursor);
         return true;
     };
 
@@ -146,71 +218,14 @@ define(function (require, exports, module) {
      * @return {boolean} return true/false to indicate whether hinting should be triggered by this key.
      */
     JSHints.prototype.shouldShowHintsOnKey = function (key) {
-        return false;
+        return true;
     };
-    
-    function _listAllTokens(text) {
-        var mode = CodeMirror.getMode({indentUnit: 2}, "javascript");
-        
-        var state, lines, lineCount;
-        var token, style, stream, line;
-        
-        function _hasStream() {
-            while (stream.eol()) {
-                line++;
-                if (line >= lineCount) {
-                    return false;
-                }
-
-                stream = new CodeMirror.StringStream(lines[line]);
-            }
-            return true;
-        }
-        
-        function _firstToken() {
-            state = CodeMirror.startState(mode);
-            lines = CodeMirror.splitLines(text);
-            lineCount = lines.length;
-            if (lineCount === 0) {
-                return false;
-            }
-            line = 0;
-            stream = new CodeMirror.StringStream(lines[line]);
-            if (!_hasStream()) {
-                return false;
-            }
-            style = mode.token(stream, state);
-            token = stream.current();
-            return true;
-        }
-        
-        function _nextToken() {
-            // advance the stream past this token
-            stream.start = stream.pos;
-            if (!_hasStream()) {
-                return false;
-            }
-            style = mode.token(stream, state);
-            token = stream.current();
-            return true;
-        }
-        
-        if (_firstToken()) {
-            console.log(style + ":" + token);
-            while (_nextToken()) {
-                console.log(style + ":" + token);
-            }
-        }
-    
-    }
 
     // load everything when brackets is done loading
     AppInit.appReady(function () {
         // install autocomplete handler
-        var jsHints = new JSHints();
+        var jsHints = new JSHints();		
         CodeHintManager.registerHintProvider(jsHints);
-        
-        //_listAllTokens("function (n) { console.log(n);}");
         
         console.log("hi");
     });
