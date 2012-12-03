@@ -33,6 +33,7 @@ define(function (require, exports, module) {
         EditorUtils             = brackets.getModule("editor/EditorUtils"),
         AppInit                 = brackets.getModule("utils/AppInit");
 
+    // hinting is provided by CodeMirror
     require("thirdparty/CodeMirror2/lib/util/javascript-hint.js");
 
     function _documentIsJavaScript(doc) {
@@ -54,7 +55,6 @@ define(function (require, exports, module) {
     JSHints.prototype.search = function (query) {
         return query.hintList;
     };
-
 
     /**
      * Figures out the text to use for the hint list query based on the text
@@ -105,7 +105,8 @@ define(function (require, exports, module) {
         var token;
         var cm = editor._codeMirror;
 
-        if (_documentIsJavaScript(editor.document)) { // on the off-chance we changed documents, don't change anything
+        // on the off-chance we changed documents, don't change anything
+        if (_documentIsJavaScript(editor.document)) {
             token = cm.getTokenAt(cursor);
             if (token) {
 
@@ -127,11 +128,11 @@ define(function (require, exports, module) {
     /**
      * Check whether to show hints on a specific key.
      * @param {string} key -- the character for the key user just presses.
-     * @return {boolean} return true/false to indicate whether hinting should be triggered by this key.
+     * @return {boolean} return a boolean to indicate whether hinting should be triggered.
      */
     JSHints.prototype.shouldShowHintsOnKey = function (key) {
         var editor = EditorManager.getFocusedEditor(), token;
-        if (_documentIsJavaScript(editor.document) &&
+        if (editor && _documentIsJavaScript(editor.document) &&
                 /[a-z_.\$]/.test(key)) {
 
             // don't autocomplete within strings or comments, etc.
@@ -142,6 +143,7 @@ define(function (require, exports, module) {
         return false;
     };
 
+    // load the extension
     AppInit.appReady(function () {
         var jsHints = new JSHints();
         CodeHintManager.registerHintProvider(jsHints);
