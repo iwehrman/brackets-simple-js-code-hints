@@ -37,7 +37,8 @@ define(function (require, exports, module) {
     require("thirdparty/CodeMirror2/lib/util/javascript-hint.js");
 
     function _documentIsJavaScript(doc) {
-        return doc && EditorUtils.getModeFromFileExtension(doc.file.fullPath) === "javascript";
+        return doc &&
+            EditorUtils.getModeFromFileExtension(doc.file.fullPath) === "javascript";
     }
 
     /**
@@ -67,8 +68,12 @@ define(function (require, exports, module) {
      *      Return null in queryStr to indicate NO hints can be provided.
      */
     JSHints.prototype.getQueryInfo = function (editor, cursor) {
-        var queryInfo = {queryStr: null}; // by default, don't handle
-        var token, hints, hintList, query, index;
+        var queryInfo = {queryStr: null}, // by default, don't handle
+            token,
+            hints,
+            hintList,
+            query,
+            index;
 
         if (_documentIsJavaScript(editor.document)) {
             hints = CodeMirror.javascriptHint(editor._codeMirror);
@@ -81,10 +86,6 @@ define(function (require, exports, module) {
                     query = token.string;
                 } else {
                     query = "";
-                }
-                index = hintList.indexOf(query);
-                if (index >= 0) {
-                    hintList.splice(index, 1);
                 }
 
                 queryInfo.hintList = hintList;
@@ -102,19 +103,19 @@ define(function (require, exports, module) {
      * @param {Cursor} current cursor location
      */
     JSHints.prototype.handleSelect = function (completion, editor, cursor) {
-        var token;
-        var cm = editor._codeMirror;
+        var cm = editor._codeMirror,
+            token,
+            offset = 0;
 
-        // on the off-chance we changed documents, don't change anything
+        // in case we changed documents, don't change anything
         if (_documentIsJavaScript(editor.document)) {
             token = cm.getTokenAt(cursor);
             if (token) {
 
                 // if the token is a period, append the completion;
                 // otherwise replace the existing token 
-                var offset = 0;
-                if (token.string === ".") {
-                    offset = 1;
+                if (token.string.lastIndexOf(".") === token.string.length - 1) {
+                    offset = token.string.length;
                 }
 
                 cm.replaceRange(completion,
@@ -131,14 +132,17 @@ define(function (require, exports, module) {
      * @return {boolean} return a boolean to indicate whether hinting should be triggered.
      */
     JSHints.prototype.shouldShowHintsOnKey = function (key) {
-        var editor = EditorManager.getFocusedEditor(), token;
+        var editor = EditorManager.getFocusedEditor(),
+            token;
+
         if (editor && _documentIsJavaScript(editor.document) &&
                 /[a-z_.\$]/.test(key)) {
 
             // don't autocomplete within strings or comments, etc.
             token = editor._codeMirror.getTokenAt(editor.getCursorPos());
             return (!(token.className === "string" ||
-                token.className === "comment"));
+                token.className === "comment" ||
+                token.className === "number"));
         }
         return false;
     };
