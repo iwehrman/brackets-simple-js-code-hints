@@ -23,185 +23,27 @@
 
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
-/*global define, brackets, $, CodeMirror */
+/*global define, brackets, CodeMirror */
 
 define(function (require, exports, module) {
     "use strict";
-	
+
     var CodeHintManager         = brackets.getModule("editor/CodeHintManager"),
-        DocumentManager         = brackets.getModule("document/DocumentManager"),
         EditorManager           = brackets.getModule("editor/EditorManager"),
         EditorUtils             = brackets.getModule("editor/EditorUtils"),
-        AppInit                 = brackets.getModule("utils/AppInit"),
-        esprima                 = require('esprima/esprima'),
-        scope                   = require('scope');
-	
-	// var tokens = [];
-	
+        AppInit                 = brackets.getModule("utils/AppInit");
+
+    require("thirdparty/CodeMirror2/lib/util/javascript-hint.js");
+
     function _documentIsJavaScript(doc) {
         return doc && EditorUtils.getModeFromFileExtension(doc.file.fullPath) === "javascript";
     }
-    
-    function _findCurrentToken(editor, userCursor) {
-        var cm = editor._codeMirror;
-        var token = cm.getTokenAt(userCursor);
-        
-        if (token !== null && token.string !== null) {
-            return token.string;
-        } else {
-            return "";
-        }
-    }
-    
-    var allTokens   = [],
-        parseTree   = null,
-        globalScope = null,
-        path        = module.uri.substring(0, module.uri.lastIndexOf("/") + 1),
-        worker      = new Worker(path + "worker.js"),
-    
-    function cursorOffset(document, cursor) {
-        var offset = 0,
-            i;
-        for (i = 0; i < cursor.line; i++) {
-            // +1 for the removed line break
-            offset += document.getLine(i).length + 1; 
-        }
-        offset += cursor.ch;
-        return offset;
-    }
 
-    function _updateTokenList(document) {
-        var text    = document.getText(false),
-            options = { range: true,
-                        tokens: true,
-                        tolerant    : true};
-
-        // try to update the master token list
-        try {
-            parseTree = esprima.parse(text, options);
-            globalScope = new scope.Scope(parseTree);
-            allTokens = parseTree.tokens.filter(function (t) {
-                return (t.type === "Identifier");
-            });
-        } catch (ex) {
-            console.log("Esprima: " + ex);
-        }
-    }
-    
-    function _findTokens(editor, cursor, prefix) {
-        var cursorScope,
-            token,
-            uniqueTokens,
-            matchingTokens = [];
-
-        if (parseTree !== null) {
-            cursorScope = globalScope.findChild(cursorOffset(editor.document, cursor));
-            if (cursorScope === null) {
-                // just use the global scope if the cursor is not in range
-                cursorScope = globalScope;
-                console.log("Global scope");
-            }
-
-            // console.log("Scope: " + cursorScope.toString());
-            // console.log("In scope: " + cursorScope.getAllIdentifiers().map(function (t) { return t.name; }));
-            uniqueTokens = allTokens.reduce(function (prev, curr) {
-                if (cursorScope.contains(curr.value) >= 0) {
-                    prev[curr.value] = curr;
-                }
-                return prev;
-            }, {});
-            
-            for (token in uniqueTokens) {
-                if (Object.prototype.hasOwnProperty.call(uniqueTokens, token) &&
-                        token.indexOf(prefix) === 0) {
-                    matchingTokens.push(token);
-                }
-            }
-        }
-        
-        return matchingTokens;
-    }
-    
-    function _isDelimiter(prefix) {
-        return (prefix === "(" || prefix === "[" ||
-					prefix === ":" || prefix === ".");
-    }
-    
-    function _insertCompletionAtCursor(completion, editor, cursor) {
-        var token;
-        var cm = editor._codeMirror;
-        
-        if (_documentIsJavaScript(editor.document)) { // on the off-chance we changed documents, don't change anything
-            token = cm.getTokenAt(cursor);
-            if (token) {
-                
-                // if the token is a delimiter, append the completion; 
-                // otherwise replace the existing token 
-                var offset = 0;
-                if (_isDelimiter(token.string)) {
-                    offset = token.string.length;
-                }
-				                
-                cm.replaceRange(completion,
-                                {line: cursor.line, ch: token.start + offset},
-                                {line: cursor.line, ch: token.end + offset});
-                console.log('token: ' + token.string);
-                console.log('completion: ' + completion);
-            }
-        }
-    }
-
-
-
-    /**
-     * Calls _updateTokenList if the document changes are significant
-     */
-    function _handleDocumentChange(event, document, changes) {
-        console.log("Args: " + arguments);
-
-        while (changes != null) {
-            console.log(JSON.stringify(changes.from) + " - " + JSON.stringify(changes.to) + " : '" + changes.text + "'");
-            if (changes.from.line !== changes.to.line) {
-                _updateTokenList(document);
-            } else {
-                if (!(changes.text[0] === "" || (new RegExp("[a-z0-9]","i").test(changes.text[0])))) {
-                    console.log("No match: " + changes.text);
-                    _updateTokenList(document);
-                } else {
-                    console.log("Match: " + changes.text);
-                }
-            }
-            changes = changes.next;
-        }
-        
-    }
-
-    function _installEditorListeners(editor) {
-        if (!editor) {
-            return;
-        }
-                
-        $(editor.document)
-            .on("change.JSCodeHints", _handleDocumentChange);
-            //.on("cursorActivity.JSCodeHints", debounceMarkOccurrences);
-        
-        // immediately parse the new editor
-        _updateTokenList(editor.document);
-    }
-    
-    function _activeEditorChange(event, current, previous) {
-        allTokens = [];
-        parseTree = null;
-        globalScope = null;
-        
-        _installEditorListeners(current);
-    }
-	
     /**
      * @constructor
      */
     function JSHints() {
-	}
+    }
 
     /**
      * Filters the source list by query and returns the result
@@ -210,7 +52,7 @@ define(function (require, exports, module) {
      * @return {Array.<string>}
      */
     JSHints.prototype.search = function (query) {
-        return query.tokens;
+        return query.hintList;
     };
 
 
@@ -226,10 +68,28 @@ define(function (require, exports, module) {
      */
     JSHints.prototype.getQueryInfo = function (editor, cursor) {
         var queryInfo = {queryStr: null}; // by default, don't handle
+        var token, hints, hintList, query, index;
 
         if (_documentIsJavaScript(editor.document)) {
-            queryInfo.queryStr = _findCurrentToken(editor, cursor);
-            queryInfo.tokens = _findTokens(editor, cursor, queryInfo.queryStr);
+            hints = CodeMirror.javascriptHint(editor._codeMirror);
+            if (hints && hints.list) {
+                hintList = hints.list;
+
+                // remove current possibly incomplete token
+                token = editor._codeMirror.getTokenAt(cursor);
+                if (token !== null && token.string !== null) {
+                    query = token.string;
+                } else {
+                    query = "";
+                }
+                index = hintList.indexOf(query);
+                if (index >= 0) {
+                    hintList.splice(index, 1);
+                }
+
+                queryInfo.hintList = hintList;
+                queryInfo.queryStr = query;
+            }
         }
 
         return queryInfo;
@@ -242,7 +102,25 @@ define(function (require, exports, module) {
      * @param {Cursor} current cursor location
      */
     JSHints.prototype.handleSelect = function (completion, editor, cursor) {
-        _insertCompletionAtCursor(completion, editor, cursor);
+        var token;
+        var cm = editor._codeMirror;
+
+        if (_documentIsJavaScript(editor.document)) { // on the off-chance we changed documents, don't change anything
+            token = cm.getTokenAt(cursor);
+            if (token) {
+
+                // if the token is a period, append the completion;
+                // otherwise replace the existing token 
+                var offset = 0;
+                if (token.string === ".") {
+                    offset = 1;
+                }
+
+                cm.replaceRange(completion,
+                                {line: cursor.line, ch: token.start + offset},
+                                {line: cursor.line, ch: token.end + offset});
+            }
+        }
         return true;
     };
 
@@ -252,22 +130,20 @@ define(function (require, exports, module) {
      * @return {boolean} return true/false to indicate whether hinting should be triggered by this key.
      */
     JSHints.prototype.shouldShowHintsOnKey = function (key) {
-        return true;
-    };
-    
-    // load everything when brackets is done loading
-    AppInit.appReady(function () {
-        
-        // uninstall/install change listner as the active editor changes
-        $(EditorManager).on("activeEditorChange.JSCodeHints", _activeEditorChange);
-        
-        // install on the initial active editor
-        _installEditorListeners(EditorManager.getActiveEditor());
+        var editor = EditorManager.getFocusedEditor(), token;
+        if (_documentIsJavaScript(editor.document) &&
+                /[a-z_.\$]/.test(key)) {
 
-        // install autocomplete handler
+            // don't autocomplete within strings or comments, etc.
+            token = editor._codeMirror.getTokenAt(editor.getCursorPos());
+            return (!(token.className === "string" ||
+                token.className === "comment"));
+        }
+        return false;
+    };
+
+    AppInit.appReady(function () {
         var jsHints = new JSHints();
         CodeHintManager.registerHintProvider(jsHints);
-        
-        console.log("hi");
     });
 });
