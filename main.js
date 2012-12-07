@@ -146,10 +146,21 @@ define(function (require, exports, module) {
         }
         return false;
     };
+    
+    /** 
+     * Decide whether the first result in the hint list should be selected by 
+     * default. 
+     */
+    JSHints.prototype.wantInitialSelection = function () {
+        return true;
+    };
 
     // load the extension
     AppInit.appReady(function () {
         var jsHints = new JSHints();
-        CodeHintManager.registerHintProvider(jsHints);
+        CodeHintManager.registerHintProvider(jsHints, ["javascript"], 0);
+
+        // for unit testing
+        exports.jsHintProvider = jsHints;
     });
 });
