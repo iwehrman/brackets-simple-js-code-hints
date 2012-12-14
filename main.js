@@ -36,64 +36,62 @@ define(function (require, exports, module) {
     // hinting is provided by CodeMirror
     require("thirdparty/CodeMirror2/lib/util/javascript-hint.js");
 
-    function _documentIsJavaScript(doc) {
-        return doc &&
-            EditorUtils.getModeFromFileExtension(doc.file.fullPath) === "javascript";
-    }
+    var editor = null;
 
+    function _documentIsJavaScript() {
+        var doc;
+        if (editor) {
+            doc = editor.document;
+            return doc &&
+                EditorUtils.getModeFromFileExtension(doc.file.fullPath) === "javascript";
+        }
+    }
+    
     /**
      * @constructor
      */
     function JSHints() {
     }
 
-    /**
-     * Filters the source list by query and returns the result
-     * @param {Object.<queryStr: string, ...} query -- a query object with a required property queryStr 
-     *     that will be used to filter out code hints
-     * @return {Array.<string>}
-     */
-    JSHints.prototype.search = function (query) {
-        return query.hintList;
-    };
-
-    /**
-     * Figures out the text to use for the hint list query based on the text
-     * around the cursor
-     * Query is the text from the start of a tag to the current cursor position
-     * @param {Editor} editor
-     * @param {Cursor} current cursor location
-     * @return {Object.<queryStr: string, ...} search query results will be filtered by.
-     *      Return empty queryStr string to indicate code hinting should not filter and show all results.
-     *      Return null in queryStr to indicate NO hints can be provided.
-     */
-    JSHints.prototype.getQueryInfo = function (editor, cursor) {
-        var queryInfo = {queryStr: null}, // by default, don't handle
+    JSHints.prototype.getHints = function (key) {
+        var response = null,
+            cursor = editor.getCursorPos(),
             token,
             hints,
             hintList,
             query,
             index;
 
-        if (_documentIsJavaScript(editor.document)) {
+        console.log("JSHint.getHints");
+
+        if (_documentIsJavaScript()) {
+
             hints = CodeMirror.javascriptHint(editor._codeMirror);
-            if (hints && hints.list) {
+            if (hints && hints.list && hints.list.length > 0) {
                 hintList = hints.list;
 
                 // remove current possibly incomplete token
                 token = editor._codeMirror.getTokenAt(cursor);
                 if (token !== null && token.string !== null) {
+                    console.log("token: '" + token.string + "'");
                     query = token.string;
                 } else {
                     query = "";
                 }
 
-                queryInfo.hintList = hintList;
-                queryInfo.queryStr = query;
+                if (key === " ") { // FIXME needs special cases for earlier punctionation like ','
+                    return response;
+                }
+
+                response = {
+                    hints: hintList, 
+                    match: query, 
+                    selectInitial: (token.string !== "(")
+                };
             }
         }
 
-        return queryInfo;
+        return response;
     };
 
     /**
@@ -102,10 +100,13 @@ define(function (require, exports, module) {
      * @param {Editor} editor
      * @param {Cursor} current cursor location
      */
-    JSHints.prototype.handleSelect = function (completion, editor, cursor) {
+    JSHints.prototype.insertHint = function (completion) {
         var cm = editor._codeMirror,
+            cursor = editor.getCursorPos(),
             token,
             offset = 0;
+
+        console.log("JSHint.insertHint")
 
         // in case we changed documents, don't change anything
         if (_documentIsJavaScript(editor.document)) {
@@ -114,7 +115,9 @@ define(function (require, exports, module) {
 
                 // if the token is a period, append the completion;
                 // otherwise replace the existing token 
-                if (token.string.lastIndexOf(".") === token.string.length - 1) {
+                if (token.string.lastIndexOf(".") === token.string.length - 1 ||
+                        token.string.lastIndexOf("(") === token.string.length - 1 ||
+                        token.string.lastIndexOf(",") === token.string.length - 1) {
                     offset = token.string.length;
                 }
 
@@ -123,7 +126,7 @@ define(function (require, exports, module) {
                                 {line: cursor.line, ch: token.end + offset});
             }
         }
-        return true;
+        return false;
     };
 
     /**
@@ -131,34 +134,32 @@ define(function (require, exports, module) {
      * @param {string} key -- the character for the key user just presses.
      * @return {boolean} return a boolean to indicate whether hinting should be triggered.
      */
-    JSHints.prototype.shouldShowHintsOnKey = function (key) {
-        var editor = EditorManager.getFocusedEditor(),
-            token;
+    JSHints.prototype.hasHints = function (ed, key) {
+        var token;
 
-        if (editor && _documentIsJavaScript(editor.document) &&
-                /[a-z_.\$]/.test(key)) {
+        editor = ed;
 
-            // don't autocomplete within strings or comments, etc.
-            token = editor._codeMirror.getTokenAt(editor.getCursorPos());
-            return (!(token.className === "string" ||
-                token.className === "comment" ||
-                token.className === "number"));
+        console.log("JSHint.hasHints")
+
+        if (_documentIsJavaScript()) {
+            if (!key) {
+                return true;
+            } else if (/[a-z_.\$\(\,]/i.test(key)) {
+                // don't autocomplete within strings or comments, etc.
+                token = editor._codeMirror.getTokenAt(editor.getCursorPos());
+                return (!(token.className === "string" ||
+                    token.className === "comment" ||
+                    token.className === "number"));    
+            }
         }
         return false;
-    };
-    
-    /** 
-     * Decide whether the first result in the hint list should be selected by 
-     * default. 
-     */
-    JSHints.prototype.wantInitialSelection = function () {
-        return true;
     };
 
     // load the extension
     AppInit.appReady(function () {
         var jsHints = new JSHints();
         CodeHintManager.registerHintProvider(jsHints, ["javascript"], 0);
+        console.log("JSHints");
 
         // for unit testing
         exports.jsHintProvider = jsHints;
