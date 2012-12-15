@@ -53,14 +53,32 @@ define(function (require, exports, module) {
     function JSHints() {
     }
 
+    JSHints.prototype.hasHints = function (ed, key) {
+        console.log("JSHint.hasHints")
+        var token;
+        editor = ed;
+
+        if (_documentIsJavaScript()) {
+            if (!key) {
+                return true;
+            } else if (/[a-z_.\$\(\,]/i.test(key)) {
+                // don't autocomplete within strings or comments, etc.
+                token = editor._codeMirror.getTokenAt(editor.getCursorPos());
+                return (!(token.className === "string" ||
+                    token.className === "comment" ||
+                    token.className === "number"));    
+            }
+        }
+        return false;
+    };
+
     JSHints.prototype.getHints = function (key) {
         var response = null,
             cursor = editor.getCursorPos(),
-            token,
             hints,
             hintList,
-            query,
-            index;
+            token,
+            query;
 
         console.log("JSHint.getHints");
 
@@ -79,7 +97,8 @@ define(function (require, exports, module) {
                     query = "";
                 }
 
-                if (key === " ") { // FIXME needs special cases for earlier punctionation like ','
+                // FIXME needs special cases for earlier punctuation like ','
+                if (key === " " || key === ";" || key === ")" || key === "}") { 
                     return response;
                 }
 
@@ -124,32 +143,6 @@ define(function (require, exports, module) {
                 cm.replaceRange(completion,
                                 {line: cursor.line, ch: token.start + offset},
                                 {line: cursor.line, ch: token.end + offset});
-            }
-        }
-        return false;
-    };
-
-    /**
-     * Check whether to show hints on a specific key.
-     * @param {string} key -- the character for the key user just presses.
-     * @return {boolean} return a boolean to indicate whether hinting should be triggered.
-     */
-    JSHints.prototype.hasHints = function (ed, key) {
-        var token;
-
-        editor = ed;
-
-        console.log("JSHint.hasHints")
-
-        if (_documentIsJavaScript()) {
-            if (!key) {
-                return true;
-            } else if (/[a-z_.\$\(\,]/i.test(key)) {
-                // don't autocomplete within strings or comments, etc.
-                token = editor._codeMirror.getTokenAt(editor.getCursorPos());
-                return (!(token.className === "string" ||
-                    token.className === "comment" ||
-                    token.className === "number"));    
             }
         }
         return false;
