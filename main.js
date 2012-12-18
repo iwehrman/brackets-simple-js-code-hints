@@ -21,7 +21,6 @@
  * 
  */
 
-
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
 /*global define, brackets, CodeMirror */
 
@@ -54,19 +53,18 @@ define(function (require, exports, module) {
     }
 
     JSHints.prototype.hasHints = function (ed, key) {
-        console.log("JSHint.hasHints")
+        console.log("JSHint.hasHints");
         var token;
         editor = ed;
 
         if (_documentIsJavaScript()) {
-            if (!key) {
-                return true;
-            } else if (/[a-z_.\$\(\,]/i.test(key)) {
+            token = editor._codeMirror.getTokenAt(editor.getCursorPos());
+            
+            if ((!key) || (/[a-z_.\$\(\,]/i.test(key))) {
                 // don't autocomplete within strings or comments, etc.
-                token = editor._codeMirror.getTokenAt(editor.getCursorPos());
                 return (!(token.className === "string" ||
                     token.className === "comment" ||
-                    token.className === "number"));    
+                    token.className === "number"));
             }
         }
         return false;
@@ -83,29 +81,38 @@ define(function (require, exports, module) {
         console.log("JSHint.getHints");
 
         if (_documentIsJavaScript()) {
+            
+            // FIXME needs special cases for earlier punctuation like ','
+            if (key === " " || key === ";" || key === ")" || key === "}") {
+                return response;
+            }
 
             hints = CodeMirror.javascriptHint(editor._codeMirror);
             if (hints && hints.list && hints.list.length > 0) {
                 hintList = hints.list;
 
-                // remove current possibly incomplete token
                 token = editor._codeMirror.getTokenAt(cursor);
+                
+                if (token.className === "string" ||
+                        token.className === "comment" ||
+                        token.className === "number") {
+                    return response;
+                }
+                    
                 if (token !== null && token.string !== null) {
                     console.log("token: '" + token.string + "'");
                     query = token.string;
+                    
+                    // remove current possibly incomplete token
+                    hintList.splice(hintList.indexOf(token.string), 1);
                 } else {
                     query = "";
                 }
 
-                // FIXME needs special cases for earlier punctuation like ','
-                if (key === " " || key === ";" || key === ")" || key === "}") { 
-                    return response;
-                }
-
                 response = {
-                    hints: hintList, 
-                    match: query, 
-                    selectInitial: (token.string !== "(")
+                    hints: hintList,
+                    match: query,
+                    selectInitial: !((token.string === "(") || (token.string === ","))
                 };
             }
         }
@@ -125,17 +132,23 @@ define(function (require, exports, module) {
             token,
             offset = 0;
 
-        console.log("JSHint.insertHint")
+        console.log("JSHint.insertHint");
 
         // in case we changed documents, don't change anything
         if (_documentIsJavaScript(editor.document)) {
             token = cm.getTokenAt(cursor);
             if (token) {
 
-                // if the token is a period, append the completion;
-                // otherwise replace the existing token 
+                // punctuation tokens should never be replaced
                 if (token.string.lastIndexOf(".") === token.string.length - 1 ||
+                        token.string.lastIndexOf(";") === token.string.length - 1 ||
+                        token.string.lastIndexOf(":") === token.string.length - 1 ||
                         token.string.lastIndexOf("(") === token.string.length - 1 ||
+                        token.string.lastIndexOf(")") === token.string.length - 1 ||
+                        token.string.lastIndexOf("{") === token.string.length - 1 ||
+                        token.string.lastIndexOf("}") === token.string.length - 1 ||
+                        token.string.lastIndexOf("[") === token.string.length - 1 ||
+                        token.string.lastIndexOf("]") === token.string.length - 1 ||
                         token.string.lastIndexOf(",") === token.string.length - 1) {
                     offset = token.string.length;
                 }
