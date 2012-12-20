@@ -22,7 +22,7 @@
  */
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
-/*global define, brackets, CodeMirror */
+/*global define, brackets, CodeMirror, $ */
 
 define(function (require, exports, module) {
     "use strict";
@@ -45,7 +45,7 @@ define(function (require, exports, module) {
                 EditorUtils.getModeFromFileExtension(doc.file.fullPath) === "javascript";
         }
     }
-    
+
     /**
      * @constructor
      */
@@ -76,7 +76,8 @@ define(function (require, exports, module) {
             hints,
             hintList,
             token,
-            query;
+            query,
+            index;
 
         console.log("JSHint.getHints");
 
@@ -104,14 +105,37 @@ define(function (require, exports, module) {
                     query = token.string;
                     
                     // remove current possibly incomplete token
-                    hintList.splice(hintList.indexOf(token.string), 1);
+                    index = hintList.indexOf(token.string);
+                    if (index >= 0) {
+                        hintList.splice(index, 1);
+                    }
                 } else {
                     query = "";
                 }
 
+                hintList = hintList.map(function (hint) {
+                    var index = hint.indexOf(query),
+                        $hintObj = $('<span>');
+                    
+                    if (index >= 0) {
+                        $hintObj.append(hint.slice(0, index))
+                            .append($('<span>')
+                                    .append(hint.slice(index, index + query.length))
+                                    .css('font-weight', 'bold')
+                                    .css('text-decoration', 'underline')
+                                    .css('color', 'green'))
+                            .append(hint.slice(index + query.length));
+                    } else {
+                        $hintObj.text(hint);
+                    }
+                    $hintObj.data('hint', hint);
+                    return $hintObj;
+                });
+                
                 response = {
                     hints: hintList,
-                    match: query,
+                    match: null,
+                    // match: query,
                     selectInitial: !((token.string === "(") || (token.string === ","))
                 };
             }
@@ -126,8 +150,9 @@ define(function (require, exports, module) {
      * @param {Editor} editor
      * @param {Cursor} current cursor location
      */
-    JSHints.prototype.insertHint = function (completion) {
-        var cm = editor._codeMirror,
+    JSHints.prototype.insertHint = function (hint) {
+        var completion = hint.data('hint'),
+            cm = editor._codeMirror,
             cursor = editor.getCursorPos(),
             token,
             offset = 0;
