@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2012 Adobe Systems Incorporated. All rights reserved.
  *  
@@ -53,14 +54,14 @@ define(function (require, exports, module) {
     }
 
     JSHints.prototype.hasHints = function (ed, key) {
-        console.log("JSHint.hasHints");
+        console.log("JSHint.hasHints: '" + key + "'");
         var token;
         editor = ed;
 
         if (_documentIsJavaScript()) {
             token = editor._codeMirror.getTokenAt(editor.getCursorPos());
             
-            if ((!key) || (/[a-z_.\$\(\,]/i.test(key))) {
+            if ((key === null) || (/[a-z_.\$]/i.test(key))) {
                 // don't autocomplete within strings or comments, etc.
                 return (!(token.className === "string" ||
                     token.className === "comment" ||
