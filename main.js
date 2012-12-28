@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2012 Adobe Systems Incorporated. All rights reserved.
  *  
@@ -47,6 +46,22 @@ define(function (require, exports, module) {
         }
     }
 
+    function _maybeIdentifier(key) {
+        return (/[0-9a-z_.\$]/i).test(key);
+    }
+    
+    function _okTokenClass(token) {
+        switch (token.className) {
+        case "string":
+        case "comment":
+        case "number":
+        case "regexp":
+            return false;
+        default:
+            return true;
+        }
+    }
+    
     /**
      * @constructor
      */
@@ -54,55 +69,50 @@ define(function (require, exports, module) {
     }
 
     JSHints.prototype.hasHints = function (ed, key) {
-        console.log("JSHint.hasHints: '" + key + "'");
+        console.log("JSHint.hasHints: " +
+                    (key !== null ? ("'" + key + "'") : key));
         var token;
         editor = ed;
 
         if (_documentIsJavaScript()) {
             token = editor._codeMirror.getTokenAt(editor.getCursorPos());
             
-            if ((key === null) || (/[a-z_.\$]/i.test(key))) {
+            if ((key === null) || _maybeIdentifier(key)) {
                 // don't autocomplete within strings or comments, etc.
-                return (!(token.className === "string" ||
-                    token.className === "comment" ||
-                    token.className === "number"));
+                return _okTokenClass(token);
             }
         }
         return false;
     };
+    
 
     JSHints.prototype.getHints = function (key) {
-        var response = null,
-            cursor = editor.getCursorPos(),
+        var cursor = editor.getCursorPos(),
             hints,
             hintList,
             token,
             query,
             index;
+        
+        console.log("JSHint.getHints: " +
+                    (key !== null ? ("'" + key + "'") : key));
 
-        console.log("JSHint.getHints");
-
-        if (_documentIsJavaScript()) {
+        if (!_maybeIdentifier(key)) {
+            return null;
+        }
+        
+        hints = CodeMirror.javascriptHint(editor._codeMirror);
+        if (hints && hints.list && hints.list.length > 0) {
+            hintList = hints.list;
+            token = editor._codeMirror.getTokenAt(cursor);
             
-            // FIXME needs special cases for earlier punctuation like ','
-            if (key === " " || key === ";" || key === ")" || key === "}") {
-                return response;
-            }
-
-            hints = CodeMirror.javascriptHint(editor._codeMirror);
-            if (hints && hints.list && hints.list.length > 0) {
-                hintList = hints.list;
-
-                token = editor._codeMirror.getTokenAt(cursor);
-                
-                if (token.className === "string" ||
-                        token.className === "comment" ||
-                        token.className === "number") {
-                    return response;
+            if (token) {
+                console.log("token: '" + token.string + "'");
+                if (!(_okTokenClass(token))) {
+                    return null;
                 }
-                    
-                if (token !== null && token.string !== null) {
-                    console.log("token: '" + token.string + "'");
+                
+                if (token.string !== null) {
                     query = token.string;
                     
                     // remove current possibly incomplete token
@@ -113,7 +123,7 @@ define(function (require, exports, module) {
                 } else {
                     query = "";
                 }
-
+    
                 hintList = hintList.map(function (hint) {
                     var index = hint.indexOf(query),
                         $hintObj = $('<span>');
@@ -122,9 +132,7 @@ define(function (require, exports, module) {
                         $hintObj.append(hint.slice(0, index))
                             .append($('<span>')
                                     .append(hint.slice(index, index + query.length))
-                                    .css('font-weight', 'bold')
-                                    .css('text-decoration', 'underline')
-                                    .css('color', 'green'))
+                                    .css('font-weight', 'bold'))
                             .append(hint.slice(index + query.length));
                     } else {
                         $hintObj.text(hint);
@@ -133,23 +141,21 @@ define(function (require, exports, module) {
                     return $hintObj;
                 });
                 
-                response = {
+                return {
                     hints: hintList,
                     match: null,
-                    // match: query,
-                    selectInitial: !((token.string === "(") || (token.string === ","))
+                    selectInitial: true
                 };
             }
         }
 
-        return response;
+        return null;
     };
 
     /**
      * Enters the code completion text into the editor
-     * @param {string} completion - text to insert into current code editor
-     * @param {Editor} editor
-     * @param {Cursor} current cursor location
+     * 
+     * @param {string} hint - text to insert into current code editor
      */
     JSHints.prototype.insertHint = function (hint) {
         var completion = hint.data('hint'),
@@ -158,32 +164,20 @@ define(function (require, exports, module) {
             token,
             offset = 0;
 
-        console.log("JSHint.insertHint");
+        console.log("JSHint.insertHint: '" + completion + "'");
 
-        // in case we changed documents, don't change anything
-        if (_documentIsJavaScript(editor.document)) {
-            token = cm.getTokenAt(cursor);
-            if (token) {
+        token = cm.getTokenAt(cursor);
+        if (token) {
 
-                // punctuation tokens should never be replaced
-                if (token.string.lastIndexOf(".") === token.string.length - 1 ||
-                        token.string.lastIndexOf(";") === token.string.length - 1 ||
-                        token.string.lastIndexOf(":") === token.string.length - 1 ||
-                        token.string.lastIndexOf("(") === token.string.length - 1 ||
-                        token.string.lastIndexOf(")") === token.string.length - 1 ||
-                        token.string.lastIndexOf("{") === token.string.length - 1 ||
-                        token.string.lastIndexOf("}") === token.string.length - 1 ||
-                        token.string.lastIndexOf("[") === token.string.length - 1 ||
-                        token.string.lastIndexOf("]") === token.string.length - 1 ||
-                        token.string.lastIndexOf(",") === token.string.length - 1) {
-                    offset = token.string.length;
-                }
-
-                cm.replaceRange(completion,
-                                {line: cursor.line, ch: token.start + offset},
-                                {line: cursor.line, ch: token.end + offset});
+            if (token.string.lastIndexOf(".") === token.string.length - 1) {
+                offset = token.string.length;
             }
+
+            cm.replaceRange(completion,
+                            {line: cursor.line, ch: token.start + offset},
+                            {line: cursor.line, ch: token.end + offset});
         }
+
         return false;
     };
 
