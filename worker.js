@@ -108,7 +108,8 @@
             }
             
             if (path === _path && _ast !== null) {
-                // either parsing succeeded, or it failed 
+                // either parsing succeeded, or it failed
+                self.postMessage({log: "Building scope..."});
                 _scope = new self.Scope(_ast);
                 result.success = true;
                 result.tokens = _filterByScope(offset);

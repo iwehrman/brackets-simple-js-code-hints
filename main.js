@@ -87,6 +87,9 @@ define(function (require, exports, module) {
     }
 
     function _getHintObj(query) {
+        
+        console.log("Query: '" + query + "'");
+        
         var hints = tokens.filter(function (token) {
             return (token.indexOf(query) === 0);
         });
@@ -143,7 +146,7 @@ define(function (require, exports, module) {
                     if (deferred !== null) {
                         var cursor = sessionEditor.getCursorPos(),
                             token = sessionEditor._codeMirror.getTokenAt(cursor),
-                            query = token.string;
+                            query = (token && token.string) ? token.string.trim() : "";
                         
                         deferred.resolveWith(this, [_getHintObj(query)]);
                         deferred = null;
@@ -208,7 +211,7 @@ define(function (require, exports, module) {
             token = sessionEditor._codeMirror.getTokenAt(cursor);
             console.log("token: '" + token.string + "'");
             if (token && _okTokenClass(token)) {
-                query = token.string;
+                query = token.string.trim();
 
                 if (tokens) {
                     console.log("Returning hints...");
