@@ -23,10 +23,10 @@
 
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
-/*global define */
+/*global */
 
 
-define(function (require, exports, module) {
+(function (exports) {
     "use strict";
     
     function _buildScope(tree, parent) {
@@ -42,32 +42,32 @@ define(function (require, exports, module) {
                 _buildScope(t, parent);
             });
             break;
-
+    
         case "FunctionDeclaration":
             parent.add(tree.id);
             child = parent._addChild(tree);
             child.addAll(tree.params);
             _buildScope(tree.body, child);
             break;
-
+    
         case "VariableDeclaration":
             // FIXME handle let scoping 
             tree.declarations.forEach(function (t) {
                 _buildScope(t, parent);
             });
             break;
-
+    
         case "VariableDeclarator":
             parent.add(tree.id);
             if (tree.init !== null) {
                 _buildScope(tree.init, parent);
             }
             break;
-
+    
         case "ExpressionStatement":
             _buildScope(tree.expression, parent);
             break;
-
+    
         case "SwitchStatement":
             _buildScope(tree.discriminant, parent);
             if (tree.cases) {
@@ -76,7 +76,7 @@ define(function (require, exports, module) {
                 });
             }
             break;
-
+    
         case "SwitchCase":
             tree.consequent.forEach(function (t) {
                 _buildScope(t, parent);
@@ -85,17 +85,17 @@ define(function (require, exports, module) {
                 _buildScope(tree.test, parent);
             }
             break;
-
+    
         case "BlockStatement":
             tree.body.forEach(function (t) {
                 _buildScope(t, parent);
             });
             break;
-
+    
         case "DebuggerStatement":
         case "EmptyStatement":
             break;
-
+    
         case "TryStatement":
             tree.handlers.forEach(function (t) {
                 _buildScope(t, parent);
@@ -105,17 +105,17 @@ define(function (require, exports, module) {
                 _buildScope(tree.finalizer, parent);
             }
             break;
-
+    
         case "ThrowStatement":
             _buildScope(tree.argument, parent);
             break;
-
+    
         case "WithStatement":
             [tree.object, tree.body].forEach(function (t) {
                 _buildScope(t, parent);
             });
             break;
-
+    
         case "CatchClause":
             if (tree.guard) {
                 _buildScope(tree.guard, parent);
@@ -124,13 +124,13 @@ define(function (require, exports, module) {
             child.add(tree.param);
             _buildScope(tree.body, child); // FIXME not sure if this is correct...
             break;
-
+    
         case "ReturnStatement":
             if (tree.argument) {
                 _buildScope(tree.argument, parent);
             }
             break;
-
+    
         case "ForStatement":
             _buildScope(tree.body, parent);
             if (tree.init) {
@@ -143,32 +143,32 @@ define(function (require, exports, module) {
                 _buildScope(tree.update, parent);
             }
             break;
-
+    
         case "ForInStatement":
             [tree.left, tree.right, tree.body].forEach(function (t) {
                 _buildScope(t, parent);
             });
             break;
-
+    
         case "LabeledStatement":
             _buildScope(tree.body, parent);
             break;
-
+    
         case "BreakStatement":
         case "ContinueStatement":
             if (tree.label) {
                 _buildScope(tree.label, parent);
             }
             break;
-
+    
         case "ThisExpression":
             break;
-
+    
         case "UpdateExpression":
         case "UnaryExpression":
             _buildScope(tree.argument, parent);
             break;
-
+    
         case "IfStatement":
         case "ConditionalExpression":
             if (tree.alternate) {
@@ -181,27 +181,27 @@ define(function (require, exports, module) {
                 });
             }
             break;
-
+    
         case "WhileStatement":
         case "DoWhileStatement":
             [tree.test, tree.body].forEach(function (t) {
                 _buildScope(t, parent);
             });
             break;
-
-
+    
+    
         case "SequenceExpression":
             tree.expressions.forEach(function (t) {
                 _buildScope(t, parent);
             });
             break;
-
+    
         case "ObjectExpression":
             tree.properties.forEach(function (t) {
                 _buildScope(t, parent);
             });
             break;
-
+    
         case "ArrayExpression":
             tree.elements.forEach(function (t) {
                 _buildScope(t, parent);
@@ -216,7 +216,7 @@ define(function (require, exports, module) {
             }
             _buildScope(tree.callee, parent);
             break;
-
+    
         case "BinaryExpression":
         case "AssignmentExpression":
         case "LogicalExpression":
@@ -224,13 +224,13 @@ define(function (require, exports, module) {
                 _buildScope(t, parent);
             });
             break;
-
+    
         case "MemberExpression":
             [tree.object, tree.property].forEach(function (t) {
                 _buildScope(t, parent);
             });
             break;
-
+    
         case "CallExpression":
             tree.arguments.forEach(function (t) {
                 _buildScope(t, parent);
@@ -246,16 +246,16 @@ define(function (require, exports, module) {
             child.addAll(tree.params);
             _buildScope(tree.body, child);
             break;
-
+    
         case "Property":
             // undocumented? 
             _buildScope(tree.value, parent);
             break;
-
+    
         case "Identifier":
         case "Literal":
             break;
-
+    
         default:
             throw "Unknown node type: " + tree.type;
         }
@@ -308,7 +308,7 @@ define(function (require, exports, module) {
         } else {
             return null; 
         }
-    }
+    };
     
     Scope.prototype.member = function (sym) {
         for (var i = 0; i < this.identifiers.length; i++) {
@@ -317,7 +317,7 @@ define(function (require, exports, module) {
             }
         }
         return false;
-    }
+    };
     
     Scope.prototype.contains = function (sym) {
         var depth = 0;
@@ -331,7 +331,7 @@ define(function (require, exports, module) {
             }
         } while (child != null);
         return undefined;
-    }
+    };
     
     Scope.prototype.getAllIdentifiers = function () {
         var ids = [];
@@ -341,21 +341,21 @@ define(function (require, exports, module) {
             scope = scope.parent;
         } while (scope != null);
         return ids;
-    }
-
+    };
+    
     Scope.prototype.toStringBelow = function() {
         return "[" + this.range.start + " " + this.identifiers.map(function (i) { 
                         return i.name; }).join(", ") + 
                 " : " + (this.children.map(function (c) { 
                         return c.toString() }).join("; ")) + 
                 this.range.end + "]";
-    }
+    };
      
     Scope.prototype.toString = function() {
         return "[" + this.range.start + " " + this.identifiers.map(function (i) { 
                         return i.name; }).join(", ") + 
                 this.range.end + "]";
-    }
-
-    exports.Scope = Scope; 
-});
+    };
+    
+    exports.Scope = Scope;
+})(self);

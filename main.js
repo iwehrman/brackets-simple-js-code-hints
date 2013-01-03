@@ -22,7 +22,7 @@
  */
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
-/*global define, brackets, CodeMirror, $ */
+/*global define, brackets, CodeMirror, $, Worker */
 
 define(function (require, exports, module) {
     "use strict";
@@ -33,18 +33,15 @@ define(function (require, exports, module) {
         AppInit                 = brackets.getModule("utils/AppInit");
 
     // hinting is provided by CodeMirror
-    require("thirdparty/CodeMirror2/lib/util/javascript-hint.js");
+    // require("thirdparty/CodeMirror2/lib/util/javascript-hint.js");
 
-    var editor = null;
-
-    function _documentIsJavaScript() {
-        var doc;
-        if (editor) {
-            doc = editor.document;
-            return doc &&
-                EditorUtils.getModeFromFileExtension(doc.file.fullPath) === "javascript";
-        }
-    }
+    var sessionEditor   = null,
+        path            = module.uri.substring(0, module.uri.lastIndexOf("/") + 1),
+        worker          = new Worker(path + "worker.js"),
+        working         = false,
+        dirty           = false,
+        tokens          = null,
+        deferred        = null;
 
     function _maybeIdentifier(key) {
         return (/[0-9a-z_.\$]/i).test(key);
@@ -62,37 +59,112 @@ define(function (require, exports, module) {
         }
     }
     
+    function _parseEditor() {
+        
+        function _cursorOffset(document, cursor) {
+            var offset = 0,
+                i;
+            
+            for (i = 0; i < cursor.line; i++) {
+                // +1 for the removed line break
+                offset += document.getLine(i).length + 1;
+            }
+            offset += cursor.ch;
+            return offset;
+        }
+        
+        if (!working) {
+            console.log("Parsing...");
+            working = true;
+            worker.postMessage({
+                type        : "parse",
+                text        : sessionEditor.document.getText(),
+                path        : sessionEditor.document.file.fullPath,
+                offset      : _cursorOffset(sessionEditor.document, sessionEditor.getCursorPos())
+            });
+        } else {
+            console.log("Waiting...");
+            dirty = true;
+        }
+    }
+    
+    function _startWorker() {
+        worker.addEventListener("message", function (e) {
+            var response = e.data,
+                type = response.type;
+            
+            if (type === "parse") {
+                console.log("Parsing complete.");
+                if (response.success) {
+                    // save the current syntax tree
+                    tokens = e.data.tokens;
+                    console.log("Updating AST.");
+                }
+                
+                working = false;
+                if (dirty) {
+                    dirty = false;
+                    _parseEditor();
+                }
+            } else {
+                console.log(e.data.log || e.data);
+            }
+        });
+    
+        // start the worker
+        worker.postMessage({});
+    }
+
     /**
      * @constructor
      */
     function JSHints() {
     }
 
-    JSHints.prototype.hasHints = function (ed, key) {
+    JSHints.prototype.hasHints = function (editor, key) {
         console.log("JSHint.hasHints: " +
                     (key !== null ? ("'" + key + "'") : key));
-        var token;
-        editor = ed;
-
-        if (_documentIsJavaScript()) {
-            token = editor._codeMirror.getTokenAt(editor.getCursorPos());
-            
-            if ((key === null) || _maybeIdentifier(key)) {
-                // don't autocomplete within strings or comments, etc.
-                return _okTokenClass(token);
+        
+        var cursor = editor.getCursorPos(),
+            token  = editor._codeMirror.getTokenAt(cursor);
+        sessionEditor = editor;
+        
+        if ((key === null) || _maybeIdentifier(key)) {
+            // don't autocomplete within strings or comments, etc.
+            if (_okTokenClass(token)) {
+                _parseEditor();
+                return true;
             }
         }
         return false;
     };
-    
 
     JSHints.prototype.getHints = function (key) {
-        var cursor = editor.getCursorPos(),
+        var cursor = sessionEditor.getCursorPos(),
             hints,
             hintList,
             token,
             query,
             index;
+        
+        function _highlight(hints, query) {
+            return hints.map(function (hint) {
+                var index = hint.indexOf(query),
+                    $hintObj = $('<span>');
+                
+                if (index >= 0) {
+                    $hintObj.append(hint.slice(0, index))
+                        .append($('<span>')
+                                .append(hint.slice(index, index + query.length))
+                                .css('font-weight', 'bold'))
+                        .append(hint.slice(index + query.length));
+                } else {
+                    $hintObj.text(hint);
+                }
+                $hintObj.data('hint', hint);
+                return $hintObj;
+            });
+        }
         
         console.log("JSHint.getHints: " +
                     (key !== null ? ("'" + key + "'") : key));
@@ -101,52 +173,39 @@ define(function (require, exports, module) {
             return null;
         }
         
-        hints = CodeMirror.javascriptHint(editor._codeMirror);
-        if (hints && hints.list && hints.list.length > 0) {
-            hintList = hints.list;
-            token = editor._codeMirror.getTokenAt(cursor);
+        // hints = CodeMirror.javascriptHint(sessionEditor._codeMirror);
+        
+        token = sessionEditor._codeMirror.getTokenAt(cursor);
+        console.log("token: '" + token.string + "'");
+        if (!(_okTokenClass(token))) {
+            return null;
+        }
+        
+        query = token.string;
+        hints = tokens.filter(function (token) {
+            return (token.indexOf(query) >= 0);
+        });
+        
+        if (hints && hints.length > 0) {
             
-            if (token) {
-                console.log("token: '" + token.string + "'");
-                if (!(_okTokenClass(token))) {
-                    return null;
+            if (query !== null) {
+                // remove current possibly incomplete token
+                index = hints.indexOf(query);
+                if (index >= 0) {
+                    hints.splice(index, 1);
                 }
-                
-                if (token.string !== null) {
-                    query = token.string;
-                    
-                    // remove current possibly incomplete token
-                    index = hintList.indexOf(token.string);
-                    if (index >= 0) {
-                        hintList.splice(index, 1);
-                    }
-                } else {
-                    query = "";
-                }
-    
-                hintList = hintList.map(function (hint) {
-                    var index = hint.indexOf(query),
-                        $hintObj = $('<span>');
-                    
-                    if (index >= 0) {
-                        $hintObj.append(hint.slice(0, index))
-                            .append($('<span>')
-                                    .append(hint.slice(index, index + query.length))
-                                    .css('font-weight', 'bold'))
-                            .append(hint.slice(index + query.length));
-                    } else {
-                        $hintObj.text(hint);
-                    }
-                    $hintObj.data('hint', hint);
-                    return $hintObj;
-                });
-                
-                return {
-                    hints: hintList,
-                    match: null,
-                    selectInitial: true
-                };
+            } else {
+                query = "";
             }
+
+            hints = _highlight(hints, query);
+            
+            return {
+                hints: hints,
+                match: null,
+                selectInitial: true
+            };
+
         }
 
         return null;
@@ -159,8 +218,8 @@ define(function (require, exports, module) {
      */
     JSHints.prototype.insertHint = function (hint) {
         var completion = hint.data('hint'),
-            cm = editor._codeMirror,
-            cursor = editor.getCursorPos(),
+            cm = sessionEditor._codeMirror,
+            cursor = sessionEditor.getCursorPos(),
             token,
             offset = 0;
 
@@ -180,9 +239,14 @@ define(function (require, exports, module) {
 
         return false;
     };
+    
+    
 
     // load the extension
     AppInit.appReady(function () {
+        
+        _startWorker();
+        
         var jsHints = new JSHints();
         CodeHintManager.registerHintProvider(jsHints, ["javascript"], 0);
         console.log("JSHints");
