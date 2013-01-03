@@ -46,7 +46,7 @@ define(function (require, exports, module) {
     function _maybeIdentifier(key) {
         return (/[0-9a-z_.\$]/i).test(key);
     }
-    
+
     function _okTokenClass(token) {
         switch (token.className) {
         case "string":
@@ -57,6 +57,47 @@ define(function (require, exports, module) {
         default:
             return true;
         }
+    }
+    
+    function _highlightQuery(hints, query) {
+        return hints.map(function (hint) {
+            var index = hint.indexOf(query),
+                $hintObj = $('<span>');
+            
+            if (index >= 0) {
+                $hintObj.append(hint.slice(0, index))
+                    .append($('<span>')
+                            .append(hint.slice(index, index + query.length))
+                            .css('font-weight', 'bold'))
+                    .append(hint.slice(index + query.length));
+            } else {
+                $hintObj.text(hint);
+            }
+            $hintObj.data('hint', hint);
+            return $hintObj;
+        });
+    }
+
+    function _filterQuery(hints, query) {
+        // remove current possibly incomplete token
+        var index = hints.indexOf(query);
+        if (index >= 0) {
+            hints.splice(index, 1);
+        }
+    }
+
+    function _getHintObj(query) {
+        var hints = tokens.filter(function (token) {
+            return (token.indexOf(query) === 0);
+        });
+        
+        _filterQuery(hints, query);
+        
+        return {
+            hints: _highlightQuery(hints, query),
+            match: null,
+            selectInitial: true
+        };
     }
     
     function _parseEditor() {
@@ -96,9 +137,23 @@ define(function (require, exports, module) {
             if (type === "parse") {
                 console.log("Parsing complete.");
                 if (response.success) {
-                    // save the current syntax tree
                     tokens = e.data.tokens;
-                    console.log("Updating AST.");
+                    console.log("Updating token list.");
+                    
+                    if (deferred !== null) {
+                        var cursor = sessionEditor.getCursorPos(),
+                            token = sessionEditor._codeMirror.getTokenAt(cursor),
+                            query = token.string;
+                        
+                        deferred.resolveWith(this, [_getHintObj(query)]);
+                        deferred = null;
+                    }
+                } else {
+                    tokens = null;
+                    if (deferred !== null) {
+                        deferred.reject();
+                        deferred = null;
+                    }
                 }
                 
                 working = false;
@@ -128,6 +183,7 @@ define(function (require, exports, module) {
         var cursor = editor.getCursorPos(),
             token  = editor._codeMirror.getTokenAt(cursor);
         sessionEditor = editor;
+        tokens = null;
         
         if ((key === null) || _maybeIdentifier(key)) {
             // don't autocomplete within strings or comments, etc.
@@ -142,72 +198,31 @@ define(function (require, exports, module) {
     JSHints.prototype.getHints = function (key) {
         var cursor = sessionEditor.getCursorPos(),
             hints,
-            hintList,
             token,
-            query,
-            index;
-        
-        function _highlight(hints, query) {
-            return hints.map(function (hint) {
-                var index = hint.indexOf(query),
-                    $hintObj = $('<span>');
-                
-                if (index >= 0) {
-                    $hintObj.append(hint.slice(0, index))
-                        .append($('<span>')
-                                .append(hint.slice(index, index + query.length))
-                                .css('font-weight', 'bold'))
-                        .append(hint.slice(index + query.length));
-                } else {
-                    $hintObj.text(hint);
-                }
-                $hintObj.data('hint', hint);
-                return $hintObj;
-            });
-        }
+            query;
         
         console.log("JSHint.getHints: " +
                     (key !== null ? ("'" + key + "'") : key));
 
-        if (!_maybeIdentifier(key)) {
-            return null;
-        }
-        
-        // hints = CodeMirror.javascriptHint(sessionEditor._codeMirror);
-        
-        token = sessionEditor._codeMirror.getTokenAt(cursor);
-        console.log("token: '" + token.string + "'");
-        if (!(_okTokenClass(token))) {
-            return null;
-        }
-        
-        query = token.string;
-        hints = tokens.filter(function (token) {
-            return (token.indexOf(query) >= 0);
-        });
-        
-        if (hints && hints.length > 0) {
-            
-            if (query !== null) {
-                // remove current possibly incomplete token
-                index = hints.indexOf(query);
-                if (index >= 0) {
-                    hints.splice(index, 1);
+        if (_maybeIdentifier(key)) {
+            token = sessionEditor._codeMirror.getTokenAt(cursor);
+            console.log("token: '" + token.string + "'");
+            if (token && _okTokenClass(token)) {
+                query = token.string;
+
+                if (tokens) {
+                    console.log("Returning hints...");
+                    return _getHintObj(query);
+                } else {
+                    console.log("Deferring hints...");
+                    if (!deferred || deferred.isRejected()) {
+                        deferred = $.Deferred();
+                    }
+                    return deferred;
                 }
-            } else {
-                query = "";
             }
-
-            hints = _highlight(hints, query);
-            
-            return {
-                hints: hints,
-                match: null,
-                selectInitial: true
-            };
-
         }
-
+        
         return null;
     };
 

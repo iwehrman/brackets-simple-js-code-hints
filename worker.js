@@ -97,7 +97,7 @@
                 _path = path;
                 result.parsed = true;
                 
-                self.postMessage({log: "Parsed: " + _ast.tokens.length});
+                self.postMessage({log: "Tokens: " + _tokens.length});
                 if (_ast.errors.length > 0) {
                     self.postMessage({log: "Parse errors: " + JSON.stringify(_ast.errors)});
                 }
