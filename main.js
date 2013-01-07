@@ -36,12 +36,10 @@ define(function (require, exports, module) {
         sessionFilename     = null,
         path                = module.uri.substring(0, module.uri.lastIndexOf("/") + 1),
         outerScopeWorker    = new Worker(path + "parser-worker.js"),
-        innerScopeWorker    = new Worker(path + "scope-worker.js"),
         outerWorkerActive   = false, // is the outer worker active? 
-        innerWorkerActive   = false, // is the inner worker active? 
         pendingInnerScopeRequest = null,
-        outerScopeDirty     = false, // has the file changed since the last outer scope request? 
-        innerScopeDirty     = false, // has the outer scope changed since the last inner scope request?
+        outerScopeDirty     = true, // has the file changed since the last outer scope request? 
+        innerScopeDirty     = true, // has the outer scope changed since the last inner scope request?
         outerScope          = null, // the outer-most scope returned by the parser worker
         innerScope          = null, // the inner-most scope returned by the query worker
         tokens              = null, // the list of tokens from the inner scope
@@ -178,36 +176,33 @@ define(function (require, exports, module) {
         } else {
             console.log("Requesting inner scope...");
             pendingInnerScopeRequest = null;
-            innerWorkerActive = true; // the inner scope worker is active
-            innerScopeDirty = false; // the outer scope has not changed since the last inner scope request
+            innerScopeDirty = false;
             
-//            innerScopeWorker.postMessage({
-//                type        : "innerScope",
-//                path        : sessionEditor.document.file.fullPath,
-//                offset      : offset,
-//                scope       : outerScope
-//            });
-            
-            var innerScope = findChildScope(outerScope, offset);
-            var tokens;
+            innerScope = findChildScope(outerScope, offset);
             if (innerScope) {
                 tokens = getAllIdentifiersInScope(innerScope).map(function (t) { return t.name; });
             } else {
-                tokens = [];
+                tokens = null;
             }
             
-            
-                
-            var response = {
-                type : "innerScope",
-                path : sessionFilename,
-                offset : offset,
-                scope : innerScope,
-                tokens : tokens,
-                success : true
-            };
-            
-            return _handleInnerScope(response);
+            if (tokens !== null) {
+                if (deferred !== null) {
+                    var cursor = sessionEditor.getCursorPos(),
+                        token = sessionEditor._codeMirror.getTokenAt(cursor),
+                        query = (token && token.string) ? token.string.trim() : "";
+                    
+                    deferred.resolveWith(null, [_getHintObj(query)]);
+                    deferred = null;
+                    console.log("Deferred hints resolved.");
+                }
+            } else {
+                console.log("Inner scope failure.");
+                if (deferred !== null) {
+                    deferred.reject();
+                    deferred = null;
+                    console.log("Deferred hints rejected.");
+                }
+            }
         }
     }
     
@@ -237,11 +232,7 @@ define(function (require, exports, module) {
         if (innerScope === null || innerScopeDirty ||
                 !_sameScope(innerScope, offset)) {
             console.log("Inner scope requires refresh.");
-            if (!innerWorkerActive) {
-                _requestInnerScope(offset);
-            } else {
-                console.log("Inner scope request already in progress.");
-            }
+            _requestInnerScope(offset);
         } else {
             console.log("Inner scope can be reused: " +
                         innerScope.range.start + " < " +
@@ -277,57 +268,14 @@ define(function (require, exports, module) {
             console.log("Outer worker: " + (response.log || response));
         }
     }
-
-    function _handleInnerScope(response) {
-        var type = response.type;
-
-        if (type === "innerScope") {
-            console.log("Inner scope request complete.");
-            innerWorkerActive = false;
-            
-            if (response.success) {
-                innerScope = response.scope;
-                tokens = response.tokens;
-                console.log("Updated inner scope.");
-                
-                if (deferred !== null) {
-                    var cursor = sessionEditor.getCursorPos(),
-                        token = sessionEditor._codeMirror.getTokenAt(cursor),
-                        query = (token && token.string) ? token.string.trim() : "";
-                    
-                    deferred.resolveWith(null, [_getHintObj(query)]);
-                    deferred = null;
-                }
-            } else {
-                console.log("Inner scope failure.");
-                tokens = null;
-                if (deferred !== null) {
-                    deferred.reject();
-                    deferred = null;
-                }
-            }
-            
-            
-            if (innerScopeDirty) {
-                _refreshInnerScope(response.offset);
-            }
-        } else {
-            console.log("Inner worker: " + (response.log || response));
-        }
-    }
     
     function _startWorkers() {
         outerScopeWorker.addEventListener("message", function (e) {
             _handleOuterScope(e.data);
         });
         
-        innerScopeWorker.addEventListener("message", function (e) {
-            _handleInnerScope(e.data);
-        });
-    
-        // start the workers
+        // start the worker
         outerScopeWorker.postMessage({});
-        innerScopeWorker.postMessage({});
     }
 
     /**
@@ -360,8 +308,7 @@ define(function (require, exports, module) {
                     deferred.reject();
                 }
                 deferred = null;
-                var offset = _cursorOffset(editor.document, cursor);
-                _refreshInnerScope(offset);
+                _refreshOuterScope();
                 return true;
             }
         }
@@ -383,7 +330,10 @@ define(function (require, exports, module) {
             if (token && _okTokenClass(token)) {
                 query = token.string.trim();
 
-                if (tokens) {
+                var offset = _cursorOffset(sessionEditor.document, cursor);
+                _refreshInnerScope(offset);
+                
+                if (innerScope) {
                     console.log("Returning hints...");
                     return _getHintObj(query);
                 } else {
@@ -423,11 +373,17 @@ define(function (require, exports, module) {
             cm.replaceRange(completion,
                             {line: cursor.line, ch: token.start + offset},
                             {line: cursor.line, ch: token.end + offset});
+            
+            outerScopeDirty = true;
+            _refreshOuterScope();
         }
 
         return false;
     };
     
+    function foo(bar) {
+        require();
+    }
     
 
     // load the extension
