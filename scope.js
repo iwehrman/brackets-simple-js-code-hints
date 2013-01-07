@@ -257,12 +257,11 @@
             break;
     
         default:
-            throw "Unknown node type: " + tree.type;
+            throw "Unknown node type: " + tree.type + " [ " + tree + " ]";
         }
     }
     
     function Scope(tree, parent) {
-    
         this.identifiers = [];
         this.children = []; // disjoint ranges, ordered by range start
         this.range = { start: tree.range[0], end: tree.range[1] };
@@ -299,7 +298,8 @@
     Scope.prototype.findChild = function (pos) {
         if (this.range.start <= pos && pos < this.range.end) {
             for (var i = 0; i < this.children.length; i++) {
-                if (this.children[i].range.start <= pos && pos < this.children[i].range.end) {
+                if (this.children[i].range.start <= pos &&
+                        pos < this.children[i].range.end) {
                     return this.children[i].findChild(pos);
                 }
             }
@@ -356,6 +356,32 @@
                         return i.name; }).join(", ") + 
                 this.range.end + "]";
     };
+ 
+    function findChildScope(scope, pos) {
+        if (scope.range.start <= pos && pos < scope.range.end) {
+            for (var i = 0; i < scope.children.length; i++) {
+                if (scope.children[i].range.start <= pos &&
+                        pos < scope.children[i].range.end) {
+                    return findChildScope(scope.children[i], pos);
+                }
+            }
+            // if no child has a matching range, this is the most precise scope
+            return scope; 
+        } else {
+            return null; 
+        }
+    }
+    
+    function getAllIdentifiersInScope(scope) {
+        var ids = [];
+        do {
+            ids = ids.concat(scope.identifiers);
+            scope = scope.parent;
+        } while (scope != null);
+        return ids;
+    }
     
     exports.Scope = Scope;
+    exports.findChildScope = findChildScope;
+    exports.getAllIdentifiersInScope = getAllIdentifiersInScope;
 })(self);
