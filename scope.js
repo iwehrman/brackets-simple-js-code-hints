@@ -23,10 +23,9 @@
 
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
-/*global */
+/*global define */
 
-
-(function (exports) {
+define(function (require, exports, module) {
     "use strict";
     
     function _buildScope(tree, parent) {
@@ -249,6 +248,7 @@
     
         case "Property":
             // undocumented? 
+            parent.properties.push(tree.key);
             _buildScope(tree.value, parent);
             break;
     
@@ -257,21 +257,41 @@
             break;
     
         default:
-            throw "Unknown node type: " + tree.type + " [ " + tree + " ]";
+            throw "Unknown node type: " + tree.type;
         }
     }
     
     function Scope(tree, parent) {
-        this.identifiers = [];
-        this.children = []; // disjoint ranges, ordered by range start
-        this.range = { start: tree.range[0], end: tree.range[1] };
-    
-        // if parent is null, walk the AST 
-        if (parent !== undefined && parent !== null) {
-            this.parent = parent;
+        
+        function _rebuild(parent, data) {
+            var child, i;
+            parent.identifiers = data.identifiers;
+            parent.range = data.range;
+            parent.properties = data.properties;
+            parent.children = [];
+            
+            for (i = 0; i < data.children.length; i++) {
+                child = new Scope(data.children[i]);
+                child.parent = parent;
+                parent.children[i] = child;
+            }
+        }
+        
+        if (tree.identifiers && tree.range) {
+            _rebuild(this, tree);
         } else {
-            this.parent = null;
-            _buildScope(tree, this);
+            this.properties = [];
+            this.identifiers = [];
+            this.children = []; // disjoint ranges, ordered by range start
+            this.range = { start: tree.range[0], end: tree.range[1] };
+        
+            // if parent is null, walk the AST 
+            if (parent !== undefined && parent !== null) {
+                this.parent = parent;
+            } else {
+                this.parent = null;
+                _buildScope(tree, this);
+            }
         }
     }
     
@@ -339,7 +359,7 @@
         do {
             ids = ids.concat(this.identifiers);
             scope = scope.parent;
-        } while (scope != null);
+        } while (scope !== null);
         return ids;
     };
     
@@ -356,32 +376,52 @@
                         return i.name; }).join(", ") + 
                 this.range.end + "]";
     };
- 
-    function findChildScope(scope, pos) {
-        if (scope.range.start <= pos && pos < scope.range.end) {
-            for (var i = 0; i < scope.children.length; i++) {
-                if (scope.children[i].range.start <= pos &&
-                        pos < scope.children[i].range.end) {
-                    return findChildScope(scope.children[i], pos);
-                }
-            }
-            // if no child has a matching range, this is the most precise scope
-            return scope; 
-        } else {
-            return null; 
-        }
-    }
     
-    function getAllIdentifiersInScope(scope) {
-        var ids = [];
-        do {
-            ids = ids.concat(scope.identifiers);
-            scope = scope.parent;
-        } while (scope != null);
-        return ids;
+    Scope.prototype.walkDown = function (add, init, prop) {
+        var result = init, 
+            i;
+        
+        for (i = 0; i < this[prop].length; i++) {
+            result = add(result, this[prop][i]);
+        }
+        
+        for (i = 0; i < this.children.length; i++) {
+            result = this.children[i].walkDown(add, result, prop);
+        }
+        
+        return result;
     }
+        
+    Scope.prototype.walkDownIdentifiers = function (add, init) {
+        return this.walkDown(add, init, 'identifiers');
+    }
+
+    Scope.prototype.walkDownProperties = function (add, init) {
+        return this.walkDown(add, init, 'properties');
+    }
+        
+    Scope.prototype.walkUp = function (add, init, prop) {
+        var scope = this, 
+            result = init, 
+            i;
+        
+        while (scope !== null) {
+            for (i = 0; i < this[prop].length; i++) {
+                result = add(result, this[prop][i]);   
+            }
+            scope = scope.parent;
+        }
+        
+        return result;
+    };
+    
+    Scope.prototype.walkUpProperties = function (add, init) {
+        return this.walkUp(add, init, 'properties');
+    };
+    
+    Scope.prototype.walkUpIdentifiers = function (add, init) {
+        return this.walkUp(add, init, 'identifiers');
+    };
     
     exports.Scope = Scope;
-    exports.findChildScope = findChildScope;
-    exports.getAllIdentifiersInScope = getAllIdentifiersInScope;
-})(self);
+});

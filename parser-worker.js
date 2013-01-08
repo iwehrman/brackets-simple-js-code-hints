@@ -24,31 +24,105 @@
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
 /*global self, importScripts, esprima */
 
+function define(f) {
+    'use strict';
+    f(null, self, null);
+}
+
 (function () {
     'use strict';
+    
+    function _log(msg) {
+        self.postMessage({log: msg });
+    }
+
+    function _stopwatch(name, fun) {
+        var startDate = new Date(),
+            start = startDate.getTime(),
+            result = fun(),
+            stopDate = new Date(),
+            diff = stopDate.getTime() - start;
+
+        _log("Time (" + name + "): " + diff);
+        return result;
+    }
 
     importScripts('esprima/esprima.js', 'scope.js');
     
-    var outerScope = null;
+    var outerScope = null,
+        identifiers = null,
+        properties = null;
+    
+    function sift() {
+        var idPositions,
+            propPositions,
+            token,
+            key,
+            i;
+        
+        idPositions = outerScope.walkDownIdentifiers(function (acc, token) {
+            if (Object.prototype.hasOwnProperty.call(acc, token.name)) {
+                acc[token.name].push(token.range[0]);
+            } else {
+                acc[token.name] = [token.range[0]];
+            }
+            return acc;
+        }, {});
+        
+        identifiers = [];
+        for (key in idPositions) {
+            if (Object.prototype.hasOwnProperty.call(idPositions, key)) {
+                token = {
+                    value: key,
+                    positions: idPositions[key]
+                };
+                identifiers.push(token);
+            }
+        }
+        
+        propPositions = outerScope.walkDownProperties(function (acc, token) {
+            if (Object.prototype.hasOwnProperty.call(acc, token.name)) {
+                acc[token.name].push(token.range[0]);
+            } else {
+                acc[token.name] = [token.range[0]];
+            }
+            return acc;
+        }, {});
+        
+        properties = [];
+        for (key in propPositions) {
+            if (Object.prototype.hasOwnProperty.call(propPositions, key)) {
+                token = {
+                    value: key,
+                    positions: propPositions[key]
+                };
+                properties.push(token);
+            }
+        }
+    }
 
     function parse(text, newpath) {
         try {
             self.postMessage({log: "Parsing ..."});
-            var ast = esprima.parse(text, {
-                loc         : true,
-                range       : true,
-                tokens      : true,
-                tolerant    : true
-            });
-            
-            self.postMessage({log: "Tokens: " + ast.tokens.length});
+            var ast = _stopwatch("parse", function () {
+                    return esprima.parse(text, {
+                        loc         : true,
+                        range       : true,
+                        tolerant    : true
+                    });
+                });
             
             self.postMessage({log: "Building outer scope..."});
-            outerScope = new self.Scope(ast);
-
+            
+            _stopwatch("scope", function () {
+                outerScope = new self.Scope(ast);
+            });
+            
             if (ast.errors.length > 0) {
                 self.postMessage({log: "Parse errors: " + JSON.stringify(ast.errors)});
             }
+            
+            sift();
             
             return true;
         } catch (err) {
@@ -65,10 +139,12 @@
                 newpath = e.data.path,
                 success = parse(text, newpath),
                 result  = {
-                    type    : type,
-                    path    : newpath,
-                    scope   : outerScope,
-                    success : success
+                    type        : type,
+                    path        : newpath,
+                    scope       : outerScope,
+                    identifiers : identifiers,
+                    properties  : properties,
+                    success     : success
                 };
             
             self.postMessage(result);

@@ -22,7 +22,7 @@
  */
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
-/*global define, brackets, CodeMirror, $, Worker, setTimeout */
+/*global define, brackets, CodeMirror, $, Worker */
 
 define(function (require, exports, module) {
     "use strict";
@@ -30,7 +30,8 @@ define(function (require, exports, module) {
     var CodeHintManager         = brackets.getModule("editor/CodeHintManager"),
         EditorManager           = brackets.getModule("editor/EditorManager"),
         EditorUtils             = brackets.getModule("editor/EditorUtils"),
-        AppInit                 = brackets.getModule("utils/AppInit");
+        AppInit                 = brackets.getModule("utils/AppInit"),
+        Scope                   = require("scope").Scope;
 
     var sessionEditor       = null,
         sessionFilename     = null,
@@ -42,38 +43,26 @@ define(function (require, exports, module) {
         innerScopeDirty     = true, // has the outer scope changed since the last inner scope request?
         outerScope          = null, // the outer-most scope returned by the parser worker
         innerScope          = null, // the inner-most scope returned by the query worker
-        tokens              = null, // the list of tokens from the inner scope
+        allIdentifiers      = null,
+        allProperties       = null,
+        identifiers         = null,
+        properties          = null,
         deferred            = null; // the deferred response
-    
-    function findChildScope(scope, pos) {
-        var i;
-        if (scope.range.start <= pos && pos < scope.range.end) {
-            for (i = 0; i < scope.children.length; i++) {
-                if (scope.children[i].range.start <= pos &&
-                        pos < scope.children[i].range.end) {
-                    return findChildScope(scope.children[i], pos);
-                }
-            }
-            // if no child has a matching range, this is the most precise scope
-            return scope;
-        } else {
-            return null;
-        }
-    }
-    
-    function getAllIdentifiersInScope(scope) {
-        var ids = [];
-        do {
-            ids = ids.concat(scope.identifiers);
-            scope = scope.parent;
-        } while (scope !== null);
-        return ids;
+
+    function _stopwatch(name, fun) {
+        var startDate = new Date(),
+            start = startDate.getTime(),
+            result = fun(),
+            stopDate = new Date(),
+            diff = stopDate.getTime() - start;
+        console.log("Time (" + name + "): " + diff);
+        return result;
     }
 
     function _maybeIdentifier(key) {
         return (/[0-9a-z_.\$]/i).test(key);
     }
-    
+
     function _okTokenClass(token) {
         switch (token.className) {
         case "string":
@@ -87,8 +76,9 @@ define(function (require, exports, module) {
     }
     
     function _highlightQuery(hints, query) {
-        return hints.map(function (hint) {
-            var index = hint.indexOf(query),
+        return hints.map(function (hintObj) {
+            var hint = hintObj.value,
+                index = hint.indexOf(query),
                 $hintObj = $('<span>');
             
             if (index >= 0) {
@@ -105,23 +95,55 @@ define(function (require, exports, module) {
         });
     }
 
-    function _filterQuery(hints, query) {
+    function _filterWithQuery(tokens, query) {
+        var i,
+            hints = tokens.filter(function (token) {
+                return (token.value.indexOf(query) === 0);
+            });
+        
         // remove current possibly incomplete token
-        var index = hints.indexOf(query);
-        if (index >= 0) {
-            hints.splice(index, 1);
+        for (i = 0; i < hints.length; i++) {
+            if (hints[i].value === query) {
+                hints.splice(i, 1);
+                break;
+            }
         }
+        
+        return hints;
     }
 
-    function _getHintObj(query) {
+    function _getHintObj() {
+        var cursor = sessionEditor.getCursorPos(),
+            cm = sessionEditor._codeMirror,
+            doc = sessionEditor.document,
+            token = cm.getTokenAt(cursor),
+            query = (token && token.string) ?
+                    (token.string === "." ? "" : token.string.trim()) : "",
+            prevToken,
+            hints;
+        
+        if (cursor.ch > 0) {
+            prevToken = cm.getTokenAt({ch: cursor.ch - 1,
+                                                line: cursor.line});
+        } else if (cursor.ch === 0 && cursor.line > 0) {
+            
+            prevToken = cm.getTokenAt({ch: doc.getLine(cursor.line - 1).length,
+                                                line: cursor.line - 1});
+        } else {
+            prevToken = null;
+        }
+        
         
         console.log("Query: '" + query + "'");
         
-        var hints = tokens.filter(function (token) {
-            return (token.indexOf(query) === 0);
-        });
-        
-        _filterQuery(hints, query);
+        if ((token && (token.string === "." || token.className === "property")) ||
+                (prevToken && prevToken.string === ".")) {
+            console.log("Property lookup");
+            hints = _filterWithQuery(allProperties, query);
+        } else {
+            console.log("Identifier lookup");
+            hints = _filterWithQuery(identifiers, query);
+        }
         
         return {
             hints: _highlightQuery(hints, query),
@@ -160,7 +182,7 @@ define(function (require, exports, module) {
         if (outerScope === null || outerScopeDirty) {
             console.log("Refreshing outer scope...");
             if (!outerWorkerActive) {
-                // and if some time has passed without parsing... 
+                // and maybe if some time has passed without parsing... 
                 _requestOuterScope();
             } else {
                 console.log("Outer scope request already in progress.");
@@ -168,6 +190,48 @@ define(function (require, exports, module) {
         }
     }
     
+    function _filterByScope(scope) {
+        return allIdentifiers.filter(function (id) {
+            return (scope.contains(id.value) >= 0);
+        });
+    }
+    
+    function _sortByScope(tokens, scope, pos) {
+        
+        function mindist(pos, t) {
+            var dist = Math.abs(t.positions[0] - pos),
+                i,
+                tmp;
+            
+            for (i = 1; i < t.positions.length; i++) {
+                tmp = Math.abs(t.positions[i] - pos);
+                if (tmp < dist) {
+                    dist = tmp;
+                }
+            }
+            return dist;
+        }
+
+        function compare(a, b) {
+            var adepth = scope.contains(a.value);
+            var bdepth = scope.contains(b.value);
+    
+            if (adepth === bdepth) {
+                return mindist(pos, a) - mindist(pos, b); // sort symbols at the same scope depth
+            } else if (adepth !== null && bdepth !== null) {
+                return adepth - bdepth;
+            } else {
+                if (adepth === null) {
+                    return bdepth;
+                } else {
+                    return adepth;
+                }
+            }
+        }
+        
+        tokens.sort(compare);
+    }
+
     function _requestInnerScope(offset) {
         if (outerScope === null) {
             console.log("Inner scope request pending...");
@@ -177,21 +241,19 @@ define(function (require, exports, module) {
             console.log("Requesting inner scope...");
             pendingInnerScopeRequest = null;
             innerScopeDirty = false;
-            
-            innerScope = findChildScope(outerScope, offset);
+            innerScope = outerScope.findChild(offset);
             if (innerScope) {
-                tokens = getAllIdentifiersInScope(innerScope).map(function (t) { return t.name; });
+                _stopwatch("filter", function () {
+                    identifiers = _filterByScope(innerScope);
+                    _sortByScope(identifiers, innerScope, offset);
+                });
             } else {
-                tokens = null;
+                identifiers = null;
             }
             
-            if (tokens !== null) {
+            if (identifiers !== null) {
                 if (deferred !== null) {
-                    var cursor = sessionEditor.getCursorPos(),
-                        token = sessionEditor._codeMirror.getTokenAt(cursor),
-                        query = (token && token.string) ? token.string.trim() : "";
-                    
-                    deferred.resolveWith(null, [_getHintObj(query)]);
+                    deferred.resolveWith(null, [_getHintObj()]);
                     deferred = null;
                     console.log("Deferred hints resolved.");
                 }
@@ -240,8 +302,7 @@ define(function (require, exports, module) {
                         innerScope.range.end);
         }
     }
-    
-    
+
     function _handleOuterScope(response) {
         var type = response.type;
         
@@ -250,7 +311,12 @@ define(function (require, exports, module) {
             outerWorkerActive = false;
             
             if (response.success) {
-                outerScope = response.scope;
+                _stopwatch("rebuild", function () {
+                    outerScope = new Scope(response.scope);
+                });
+
+                allIdentifiers = response.identifiers;
+                allProperties = response.properties;
                 innerScopeDirty = true;
                 console.log("Outer scope updated.");
                 
@@ -269,13 +335,41 @@ define(function (require, exports, module) {
         }
     }
     
-    function _startWorkers() {
-        outerScopeWorker.addEventListener("message", function (e) {
-            _handleOuterScope(e.data);
-        });
+    function _refreshEditor(editor) {
+        var newFilename = editor.document.file.fullPath;
+        sessionEditor = editor;
+        if (sessionFilename !== newFilename) {
+            identifiers = null;
+            innerScope = null;
+            outerScope = null;
+            outerScopeDirty = true;
+            innerScopeDirty = true;
+        }
+        sessionFilename = newFilename;
+        if (deferred && !deferred.isRejected()) {
+            deferred.reject();
+        }
+        deferred = null;
+        _refreshOuterScope();
+    }
+
+    function _installEditorListeners(editor) {
+        if (!editor) {
+            return;
+        }
         
-        // start the worker
-        outerScopeWorker.postMessage({});
+        $(editor)
+            .on("change.brackets-js-hints", function () {
+                outerScopeDirty = true;
+                _refreshOuterScope();
+            });
+        
+        _refreshEditor(editor);
+    }
+    
+    function _uninstallEditorListeners(editor) {
+        $(editor)
+            .off("change.brackets-js-hints");
     }
 
     /**
@@ -295,20 +389,7 @@ define(function (require, exports, module) {
         if ((key === null) || _maybeIdentifier(key)) {
             // don't autocomplete within strings or comments, etc.
             if (_okTokenClass(token)) {
-                sessionEditor = editor;
-                if (sessionFilename !== newFilename) {
-                    tokens = null;
-                    innerScope = null;
-                    outerScope = null;
-                    outerScopeDirty = true;
-                    innerScopeDirty = true;
-                }
-                sessionFilename = newFilename;
-                if (deferred && !deferred.isRejected()) {
-                    deferred.reject();
-                }
-                deferred = null;
-                _refreshOuterScope();
+                _refreshEditor(editor);
                 return true;
             }
         }
@@ -318,8 +399,7 @@ define(function (require, exports, module) {
     JSHints.prototype.getHints = function (key) {
         var cursor = sessionEditor.getCursorPos(),
             hints,
-            token,
-            query;
+            token;
         
         console.log("JSHint.getHints: " +
                     (key !== null ? ("'" + key + "'") : key));
@@ -328,14 +408,13 @@ define(function (require, exports, module) {
             token = sessionEditor._codeMirror.getTokenAt(cursor);
             console.log("token: '" + token.string + "'");
             if (token && _okTokenClass(token)) {
-                query = token.string.trim();
 
                 var offset = _cursorOffset(sessionEditor.document, cursor);
                 _refreshInnerScope(offset);
                 
                 if (innerScope) {
                     console.log("Returning hints...");
-                    return _getHintObj(query);
+                    return _getHintObj();
                 } else {
                     console.log("Deferring hints...");
                     if (!deferred || deferred.isRejected()) {
@@ -381,20 +460,26 @@ define(function (require, exports, module) {
         return false;
     };
     
-    function foo(bar) {
-        require();
-    }
-    
-
     // load the extension
     AppInit.appReady(function () {
-        
-        _startWorkers();
-        
+        outerScopeWorker.addEventListener("message", function (e) {
+            _handleOuterScope(e.data);
+        });
+                
+        // uninstall/install change listner as the active editor changes
+        $(EditorManager)
+            .on("activeEditorChange.brackets-js-hints", function (event, current, previous) {
+                _uninstallEditorListeners(previous);
+                _installEditorListeners(current);
+                
+            });
+
+        _installEditorListeners(EditorManager.getActiveEditor());
+
         var jsHints = new JSHints();
         CodeHintManager.registerHintProvider(jsHints, ["javascript"], 0);
         console.log("JSHints");
-
+        
         // for unit testing
         exports.jsHintProvider = jsHints;
     });
