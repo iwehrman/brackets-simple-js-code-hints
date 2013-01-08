@@ -189,7 +189,7 @@ define(function (require, exports, module) {
             }
         }
     }
-    
+
     function _filterByScope(scope) {
         return allIdentifiers.filter(function (id) {
             return (scope.contains(id.value) >= 0);
@@ -268,23 +268,6 @@ define(function (require, exports, module) {
         }
     }
     
-    function _sameScope(scope, pos) {
-        var range = scope.range,
-            children = scope.children,
-            i;
-        // is in the parent's scope...
-        if (range.start <= pos && pos < range.end) {
-            for (i = 0; i < children.length; i++) {
-                // but not in a child's scope
-                if (_sameScope(children[i], pos)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        return false;
-    }
-    
     function _refreshInnerScope(offset) {
         console.log("Refreshing inner scope at offset " + offset + "...");
         
@@ -292,7 +275,7 @@ define(function (require, exports, module) {
         // changed, or if the inner scope is invalid w.r.t. the current cursor
         // position we might need to update the inner scope
         if (innerScope === null || innerScopeDirty ||
-                !_sameScope(innerScope, offset)) {
+                !innerScope.hasPosition(offset)) {
             console.log("Inner scope requires refresh.");
             _requestInnerScope(offset);
         } else {

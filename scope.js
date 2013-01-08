@@ -377,6 +377,25 @@ define(function (require, exports, module) {
                 this.range.end + "]";
     };
     
+    Scope.prototype.hasPosition = function (pos) {
+        var range = this.range,
+            children = this.children,
+            i;
+        
+        // is in the scope's range...
+        if (range.start <= pos && pos < range.end) {
+            for (i = 0; i < children.length; i++) {
+                // but not in a child's scope
+                if (children[i].hasPosition(pos)) {
+                    return false;
+                }
+            }
+            return true;
+        } else {
+            return false;
+        }
+    };
+    
     Scope.prototype.walkDown = function (add, init, prop) {
         var result = init, 
             i;
