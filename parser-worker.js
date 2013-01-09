@@ -106,7 +106,6 @@ function define(f) {
             self.postMessage({log: "Parsing ..."});
             var ast = _stopwatch("parse", function () {
                     return esprima.parse(text, {
-                        loc         : true,
                         range       : true,
                         tolerant    : true
                     });
