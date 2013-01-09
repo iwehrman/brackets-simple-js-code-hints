@@ -31,7 +31,9 @@ function define(f) {
 
 (function () {
     'use strict';
-    
+
+    importScripts('esprima/esprima.js', 'scope.js');
+
     function _log(msg) {
         self.postMessage({log: msg });
     }
@@ -47,87 +49,57 @@ function define(f) {
         return result;
     }
 
-    importScripts('esprima/esprima.js', 'scope.js');
-    
-    var outerScope = null,
-        identifiers = null,
-        properties = null;
-    
-    function sift() {
-        var idPositions,
-            propPositions,
+    function sift(scope, type) {
+        var positions,
+            results = [],
             token,
             key,
             i;
         
-        idPositions = outerScope.walkDownIdentifiers(function (acc, token) {
+        positions = scope.walkDown(function (acc, token) {
             if (Object.prototype.hasOwnProperty.call(acc, token.name)) {
                 acc[token.name].push(token.range[0]);
             } else {
                 acc[token.name] = [token.range[0]];
             }
             return acc;
-        }, {});
+        }, {}, type);
         
-        identifiers = [];
-        for (key in idPositions) {
-            if (Object.prototype.hasOwnProperty.call(idPositions, key)) {
+        for (key in positions) {
+            if (Object.prototype.hasOwnProperty.call(positions, key)) {
                 token = {
                     value: key,
-                    positions: idPositions[key]
+                    positions: positions[key]
                 };
-                identifiers.push(token);
+                results.push(token);
             }
         }
-        
-        propPositions = outerScope.walkDownProperties(function (acc, token) {
-            if (Object.prototype.hasOwnProperty.call(acc, token.name)) {
-                acc[token.name].push(token.range[0]);
-            } else {
-                acc[token.name] = [token.range[0]];
-            }
-            return acc;
-        }, {});
-        
-        properties = [];
-        for (key in propPositions) {
-            if (Object.prototype.hasOwnProperty.call(propPositions, key)) {
-                token = {
-                    value: key,
-                    positions: propPositions[key]
-                };
-                properties.push(token);
-            }
-        }
+        return results;
     }
-
+    
     function parse(text, newpath) {
+        var scope = null,
+            ast;
         try {
-            self.postMessage({log: "Parsing ..."});
-            var ast = _stopwatch("parse", function () {
-                    return esprima.parse(text, {
-                        range       : true,
-                        tolerant    : true
-                    });
+            ast = _stopwatch("parse", function () {
+                return esprima.parse(text, {
+                    range       : true,
+                    tolerant    : true
                 });
-            
-            self.postMessage({log: "Building outer scope..."});
-            
-            _stopwatch("scope", function () {
-                outerScope = new self.Scope(ast);
             });
             
             if (ast.errors.length > 0) {
-                self.postMessage({log: "Parse errors: " + JSON.stringify(ast.errors)});
+                _log("Parse errors: " + JSON.stringify(ast.errors));
             }
             
-            sift();
+            _stopwatch("scope", function () {
+                scope = new self.Scope(ast);
+            });
             
-            return true;
         } catch (err) {
-            self.postMessage({log: "Parsing failed: " + err});
-            return false;
+            _log("Parsing failed: " + err);
         }
+        return scope;
     }
     
     self.addEventListener("message", function (e) {
@@ -136,21 +108,21 @@ function define(f) {
         if (type === "outerScope") {
             var text    = e.data.text,
                 newpath = e.data.path,
-                success = parse(text, newpath),
+                scope = parse(text, newpath),
+                identifiers = sift(scope, 'identifiers'),
+                properties = sift(scope, 'properties'),
                 result  = {
                     type        : type,
                     path        : newpath,
-                    scope       : outerScope,
+                    scope       : scope,
                     identifiers : identifiers,
                     properties  : properties,
-                    success     : success
+                    success     : !!scope
                 };
             
             self.postMessage(result);
         } else {
-            self.postMessage({
-                log : "Unknown message: " + JSON.stringify(e.data)
-            });
+            _log("Unknown message: " + JSON.stringify(e.data));
         }
     });
 }());
