@@ -48,7 +48,7 @@ function define(f) {
         _log("Time (" + name + "): " + diff);
         return result;
     }
-
+    
     function sift(scope, type) {
         var positions,
             results = [],
@@ -109,8 +109,8 @@ function define(f) {
             var text    = e.data.text,
                 newpath = e.data.path,
                 scope = parse(text, newpath),
-                identifiers = sift(scope, 'identifiers'),
-                properties = sift(scope, 'properties'),
+                identifiers = scope ? sift(scope, 'identifiers') : null,
+                properties = scope ? sift(scope, 'properties') : null,
                 result  = {
                     type        : type,
                     path        : newpath,
