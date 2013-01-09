@@ -76,8 +76,8 @@ define(function (require, exports, module) {
     }
     
     function _highlightQuery(hints, query) {
-        return hints.map(function (hintObj) {
-            var hint = hintObj.value,
+        return hints.map(function (token) {
+            var hint = token.value,
                 index = hint.indexOf(query),
                 $hintObj = $('<span>');
             
@@ -91,6 +91,19 @@ define(function (require, exports, module) {
                 $hintObj.text(hint);
             }
             $hintObj.data('hint', hint);
+            
+            switch (token.level) {
+            case 0:
+                $hintObj.css('color', 'rgb(0,100,0)');
+                break;
+            case 1:
+                $hintObj.css('color', 'rgb(100,100,0)');
+                break;
+            case 2:
+                $hintObj.css('color', 'rgb(0,0,100)');
+                break;
+            }
+
             return $hintObj;
         });
     }
@@ -192,7 +205,13 @@ define(function (require, exports, module) {
 
     function _filterByScope(scope) {
         return allIdentifiers.filter(function (id) {
-            return (scope.contains(id.value) >= 0);
+            var level = scope.contains(id.value);
+            if (level >= 0) {
+                id.level = level;
+                return true;
+            } else {
+                return false;
+            }
         });
     }
     
@@ -215,7 +234,7 @@ define(function (require, exports, module) {
         function compare(a, b) {
             var adepth = scope.contains(a.value);
             var bdepth = scope.contains(b.value);
-    
+
             if (adepth === bdepth) {
                 return mindist(pos, a) - mindist(pos, b); // sort symbols at the same scope depth
             } else if (adepth !== null && bdepth !== null) {
