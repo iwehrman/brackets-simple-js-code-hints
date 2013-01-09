@@ -38,16 +38,15 @@ define(function (require, exports, module) {
         path                = module.uri.substring(0, module.uri.lastIndexOf("/") + 1),
         outerScopeWorker    = new Worker(path + "parser-worker.js"),
         outerWorkerActive   = false, // is the outer worker active? 
-        pendingInnerScopeRequest = null,
         outerScopeDirty     = true, // has the file changed since the last outer scope request? 
-        innerScopeDirty     = true, // has the outer scope changed since the last inner scope request?
         outerScope          = null, // the outer-most scope returned by the parser worker
+        allIdentifiers      = null, // all identifiers from the outer scope
+        allProperties       = null, // all properties from the outer scope
+        pendingInnerScopeRequest = null, //
+        innerScopeDirty     = true, // has the outer scope changed since the last inner scope request?
         innerScope          = null, // the inner-most scope returned by the query worker
-        allIdentifiers      = null,
-        allProperties       = null,
-        identifiers         = null,
-        properties          = null,
-        deferred            = null; // the deferred response
+        identifiers         = null, // identifi
+        deferred            = null; // deferred hint object
 
     function _stopwatch(name, fun) {
         var startDate = new Date(),
@@ -146,7 +145,6 @@ define(function (require, exports, module) {
             prevToken = null;
         }
         
-        
         console.log("Query: '" + query + "'");
         
         if ((token && (token.string === "." || token.className === "property")) ||
@@ -165,46 +163,8 @@ define(function (require, exports, module) {
         };
     }
 
-    function _cursorOffset(document, cursor) {
-        var offset = 0,
-            i;
-        
-        for (i = 0; i < cursor.line; i++) {
-            // +1 for the removed line break
-            offset += document.getLine(i).length + 1;
-        }
-        offset += cursor.ch;
-        return offset;
-    }
-
-    function _requestOuterScope() {
-        console.log("Requesting outer scope...");
-        outerWorkerActive = true; // the outer scope worker is active
-        outerScopeDirty = false; // the file is clean since the last outer scope request
-        
-        outerScopeWorker.postMessage({
-            type        : "outerScope",
-            path        : sessionFilename,
-            text        : sessionEditor.document.getText()
-        });
-    }
-    
-    function _refreshOuterScope() {
-        // if there is not yet an outer scope or if the file has changed then
-        // we might need to update the outer scope
-        if (outerScope === null || outerScopeDirty) {
-            console.log("Refreshing outer scope...");
-            if (!outerWorkerActive) {
-                // and maybe if some time has passed without parsing... 
-                _requestOuterScope();
-            } else {
-                console.log("Outer scope request already in progress.");
-            }
-        }
-    }
-
-    function _filterByScope(scope) {
-        return allIdentifiers.filter(function (id) {
+    function _filterByScope(tokens, scope) {
+        return tokens.filter(function (id) {
             var level = scope.contains(id.value);
             if (level >= 0) {
                 id.level = level;
@@ -215,23 +175,21 @@ define(function (require, exports, module) {
         });
     }
     
-    function _sortByScope(tokens, scope, pos) {
-        
-        function mindist(pos, t) {
-            var dist = Math.abs(t.positions[0] - pos),
-                i,
-                tmp;
-            
-            for (i = 1; i < t.positions.length; i++) {
-                tmp = Math.abs(t.positions[i] - pos);
-                if (tmp < dist) {
-                    dist = tmp;
+    function _compareScopes(scope, pos) {
+        return function (a, b) {
+            function mindist(pos, t) {
+                var dist = Math.abs(t.positions[0] - pos),
+                    i,
+                    tmp;
+                
+                for (i = 1; i < t.positions.length; i++) {
+                    tmp = Math.abs(t.positions[i] - pos);
+                    if (tmp < dist) {
+                        dist = tmp;
+                    }
                 }
+                return dist;
             }
-            return dist;
-        }
-
-        function compare(a, b) {
             var adepth = scope.contains(a.value);
             var bdepth = scope.contains(b.value);
 
@@ -246,25 +204,48 @@ define(function (require, exports, module) {
                     return adepth;
                 }
             }
-        }
-        
-        tokens.sort(compare);
+        };
     }
 
+    function _requestOuterScope() {
+        console.log("Requesting outer scope...");
+        outerWorkerActive = true; // the outer scope worker is active
+        outerScopeDirty = false; // the file is clean since the last outer scope request
+        
+        outerScopeWorker.postMessage({
+            type        : "outerScope",
+            path        : sessionFilename,
+            text        : sessionEditor.document.getText()
+        });
+    }
+
+    function _refreshOuterScope() {
+        // if there is not yet an outer scope or if the file has changed then
+        // we might need to update the outer scope
+        if (outerScope === null || outerScopeDirty) {
+            console.log("Refreshing outer scope...");
+            if (!outerWorkerActive) {
+                // and maybe if some time has passed without parsing... 
+                _requestOuterScope();
+            } else {
+                console.log("Outer scope request already in progress.");
+            }
+        }
+    }
+            
     function _requestInnerScope(offset) {
         if (outerScope === null) {
             console.log("Inner scope request pending...");
             pendingInnerScopeRequest = offset;
             _refreshOuterScope();
         } else {
-            console.log("Requesting inner scope...");
             pendingInnerScopeRequest = null;
             innerScopeDirty = false;
             innerScope = outerScope.findChild(offset);
             if (innerScope) {
                 _stopwatch("filter", function () {
-                    identifiers = _filterByScope(innerScope);
-                    _sortByScope(identifiers, innerScope, offset);
+                    identifiers = _filterByScope(allIdentifiers, innerScope);
+                    identifiers.sort(_compareScopes(innerScope, offset));
                 });
             } else {
                 identifiers = null;
@@ -286,7 +267,7 @@ define(function (require, exports, module) {
             }
         }
     }
-    
+            
     function _refreshInnerScope(offset) {
         console.log("Refreshing inner scope at offset " + offset + "...");
         
@@ -304,7 +285,7 @@ define(function (require, exports, module) {
                         innerScope.range.end);
         }
     }
-
+            
     function _handleOuterScope(response) {
         var type = response.type;
         
@@ -336,7 +317,7 @@ define(function (require, exports, module) {
             console.log("Outer worker: " + (response.log || response));
         }
     }
-    
+
     function _refreshEditor(editor) {
         var newFilename = editor.document.file.fullPath;
         sessionEditor = editor;
@@ -402,6 +383,18 @@ define(function (require, exports, module) {
         var cursor = sessionEditor.getCursorPos(),
             hints,
             token;
+        
+        function _cursorOffset(document, cursor) {
+            var offset = 0,
+                i;
+            
+            for (i = 0; i < cursor.line; i++) {
+                // +1 for the removed line break
+                offset += document.getLine(i).length + 1;
+            }
+            offset += cursor.ch;
+            return offset;
+        }
         
         console.log("JSHint.getHints: " +
                     (key !== null ? ("'" + key + "'") : key));
