@@ -281,12 +281,12 @@ define(function (require, exports, module) {
                     // accumulated position information.
                     identifiers = filterByScope(allIdentifiers, innerScope);
                     identifiers.sort(compareScopes(innerScope, offset));
-                    identifiers = identifiers.concat(allGlobals);
                     properties = allProperties.slice(0).sort(comparePositions(offset));
                 } else {
                     identifiers = [];
                     properties = [];
                 }
+                identifiers = identifiers.concat(allGlobals);
 
                 if ($deferredHintObj !== null &&
                         $deferredHintObj.state() === "pending") {
