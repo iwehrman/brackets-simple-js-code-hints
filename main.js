@@ -77,6 +77,20 @@ define(function (require, exports, module) {
             return null;
         }
 
+        /**
+         * Calculate a query string relative to the current cursor position
+         * and token.
+         */
+        function getQuery(cursor, token) {
+            var query;
+            if (token && token.string) {
+                if (token.string !== ".") {
+                    return token.string.substring(0, (cursor.ch - token.start)).trim();
+                }
+            }
+            return "";
+        }
+
         /*
          * Filter a list of tokens using a given query string
          */
@@ -136,11 +150,10 @@ define(function (require, exports, module) {
         var cursor = sessionEditor.getCursorPos(),
             cm = sessionEditor._codeMirror,
             token = cm.getTokenAt(cursor),
-            query = (token && token.string) ?
-                    (token.string === "." ? "" : token.string.trim()) : "",
             prevToken = getPreviousToken(cm, cursor),
+            query = getQuery(cursor, token),
             hints;
-        
+
 //        console.log("Token: '" + token.string + "'");
 //        console.log("Prev: '" + (prevToken ? prevToken.string : "(null)") + "'");
 //        console.log("Query: '" + query + "'");
@@ -378,7 +391,7 @@ define(function (require, exports, module) {
             return offset;
         }
         
-        if (_maybeIdentifier(key)) {
+        if ((key === null) || _maybeIdentifier(key)) {
             token = sessionEditor._codeMirror.getTokenAt(cursor);
 
             if (token && _hintableTokenClass(token)) {
