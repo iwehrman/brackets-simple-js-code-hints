@@ -1,4 +1,4 @@
 Brackets JavaScript Code Hints
 ==============================
 
-This is an experiemental [Brackets](http://brackets.io) extension that provides code hints (aka *autocompletion*) for the JavaScript programmingi language. It currently attempts to provide hints for variables, function parameters and properties. The results are sorted and filtered according to lexical scope and the position of occurences in the current file. 
+An experimental extension for the [Brackets](http://brackets.io) text editor that provides code hints (aka *autocompletion*) for the JavaScript programming language. Hints are provided for variables, function parameters and properties, and are sorted and filtered according to lexical scope and the positions of occurrences in the current file. 
