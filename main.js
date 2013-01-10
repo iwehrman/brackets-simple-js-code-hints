@@ -34,7 +34,7 @@ define(function (require, exports, module) {
         Scope                   = require("scope").Scope;
 
     var sessionEditor       = null,  // editor object for the current hinting session
-        deferredHintObj     = null,  // deferred hint object
+        $deferredHintObj    = null,  // deferred hint object
         innerScopePending   = null,  // was an inner scope request delayed waiting for an outer scope?
         innerScopeDirty     = true,  // has the outer scope changed since the last inner scope request?
         innerScope          = null,  // the inner-most scope returned by the query worker
@@ -68,7 +68,7 @@ define(function (require, exports, module) {
                 return cm.getTokenAt({ch: doc.getLine(cursor.line - 1).length,
                                       line: cursor.line - 1});
             }
-
+            
             return null;
         }
 
@@ -136,10 +136,9 @@ define(function (require, exports, module) {
             prevToken = getPreviousToken(cm, cursor),
             hints;
         
-        
-        console.log("Token: '" + token.string + "'");
-        console.log("Prev: '" + (prevToken ? prevToken.string : "(null)") + "'");
-        console.log("Query: '" + query + "'");
+//        console.log("Token: '" + token.string + "'");
+//        console.log("Prev: '" + (prevToken ? prevToken.string : "(null)") + "'");
+//        console.log("Query: '" + query + "'");
         
         if ((token && (token.string === "." || token.className === "property")) ||
                 (prevToken && prevToken.string.indexOf(".") >= 0)) {
@@ -162,10 +161,8 @@ define(function (require, exports, module) {
         // if there is not yet an outer scope or if the file has changed then
         // we might need to update the outer scope
         if (outerScope === null || outerScopeDirty) {
-            console.log("Refreshing outer scope...");
             if (!outerWorkerActive) {
                 // and maybe if some time has passed without parsing... 
-                console.log("Requesting outer scope...");
                 outerWorkerActive = true; // the outer scope worker is active
                 outerScopeDirty = false; // the file is clean since the last outer scope request
                 outerScopeWorker.postMessage({
@@ -173,8 +170,6 @@ define(function (require, exports, module) {
                     path        : sessionEditor.document.file.fullPath,
                     text        : sessionEditor.document.getText()
                 });
-            } else {
-                console.log("Outer scope request already in progress.");
             }
         }
     }
@@ -252,36 +247,34 @@ define(function (require, exports, module) {
         // position we might need to update the inner scope
         if (innerScope === null || innerScopeDirty ||
                 !innerScope.containsPositionImmediate(offset)) {
-            console.log("Rebuilding inner scope.");
+
             if (outerScope === null) {
-                console.log("Inner scope request pending...");
                 innerScopePending = offset;
                 _refreshOuterScope();
             } else {
                 innerScopePending = null;
                 innerScopeDirty = false;
-                innerScope = outerScope.findChild(offset);
                 
+                innerScope = outerScope.findChild(offset);
                 if (innerScope) {
+                    // FIXME: This could be more efficient if instead of filtering
+                    // the entire list of identifiers we just used the identifiers
+                    // in the scope of innerScope, but that list doesn't have the
+                    // accumulated position information.
                     identifiers = filterByScope(allIdentifiers, innerScope);
                     identifiers.sort(compareScopes(innerScope, offset));
                     properties = allProperties.slice(0).sort(comparePositions(offset));
-
-                    if (deferredHintObj !== null) {
-                        deferredHintObj.resolveWith(null, [_getHintObj()]);
-                        deferredHintObj = null;
-                        console.log("Deferred hints resolved.");
-                    }
                 } else {
-                    identifiers = null;
-                    properties = null;
-                    console.log("Inner scope failure.");
-                    if (deferredHintObj !== null) {
-                        deferredHintObj.reject();
-                        deferredHintObj = null;
-                        console.log("Deferred hints rejected.");
-                    }
+                    identifiers = [];
+                    properties = [];
                 }
+
+                if ($deferredHintObj !== null &&
+                        $deferredHintObj.state() === "pending") {
+                    $deferredHintObj.resolveWith(null, [_getHintObj()]);
+                }
+                
+                $deferredHintObj = null;
             }
         }
     }
@@ -293,7 +286,8 @@ define(function (require, exports, module) {
     function _refreshEditor(editor) {
         var newFilename = editor.document.file.fullPath;
 
-        if (sessionEditor && sessionEditor.document.file.fullPath !== newFilename) {
+        if (!sessionEditor ||
+                sessionEditor.document.file.fullPath !== newFilename) {
             identifiers = null;
             properties = null;
             innerScope = null;
@@ -302,10 +296,12 @@ define(function (require, exports, module) {
             innerScopeDirty = true;
         }
         sessionEditor = editor;
-        if (deferredHintObj && !deferredHintObj.isRejected()) {
-            deferredHintObj.reject();
+
+        if ($deferredHintObj && $deferredHintObj.state() === "pending") {
+            $deferredHintObj.reject();
         }
-        deferredHintObj = null;
+        $deferredHintObj = null;
+
         _refreshOuterScope();
     }
 
@@ -338,9 +334,6 @@ define(function (require, exports, module) {
     }
 
     JSHints.prototype.hasHints = function (editor, key) {
-        console.log("JSHint.hasHints: " +
-                    (key !== null ? ("'" + key + "'") : key));
-        
         var cursor      = editor.getCursorPos(),
             token       = editor._codeMirror.getTokenAt(cursor),
             newFilename = editor.document.file.fullPath;
@@ -376,9 +369,6 @@ define(function (require, exports, module) {
             return offset;
         }
         
-        console.log("JSHint.getHints: " +
-                    (key !== null ? ("'" + key + "'") : key));
-
         if (_maybeIdentifier(key)) {
             token = sessionEditor._codeMirror.getTokenAt(cursor);
 
@@ -387,19 +377,18 @@ define(function (require, exports, module) {
                 var offset = _cursorOffset(sessionEditor.document, cursor);
                 _refreshInnerScope(offset);
                 
-                if (innerScope) {
-                    console.log("Returning hints...");
+                if (outerScope) {
                     return _getHintObj();
                 } else {
                     console.log("Deferring hints...");
-                    if (!deferredHintObj || deferredHintObj.isRejected()) {
-                        deferredHintObj = $.Deferred();
+                    if (!$deferredHintObj || $deferredHintObj.isRejected()) {
+                        $deferredHintObj = $.Deferred();
                     }
-                    return deferredHintObj;
+                    return $deferredHintObj;
                 }
             }
         }
-        
+
         return null;
     };
 
@@ -414,8 +403,6 @@ define(function (require, exports, module) {
             cursor = sessionEditor.getCursorPos(),
             token,
             offset = 0;
-
-        console.log("JSHint.insertHint: '" + completion + "'");
 
         token = cm.getTokenAt(cursor);
         if (token) {
@@ -442,7 +429,6 @@ define(function (require, exports, module) {
          * Receive an outer scope object from the parser worker
          */
         function handleOuterScope(response) {
-            console.log("Outer scope request complete.");
             outerWorkerActive = false;
 
             if (response.success) {
@@ -450,7 +436,6 @@ define(function (require, exports, module) {
                 allIdentifiers = response.identifiers;
                 allProperties = response.properties;
                 innerScopeDirty = true;
-                console.log("Outer scope updated.");
 
                 if (outerScopeDirty) {
                     _refreshOuterScope();
@@ -459,8 +444,6 @@ define(function (require, exports, module) {
                 if (innerScopePending !== null) {
                     _refreshInnerScope(innerScopePending);
                 }
-            } else {
-                console.log("Outer scope failure.");
             }
         }
 
@@ -512,7 +495,6 @@ define(function (require, exports, module) {
 
         var jsHints = new JSHints();
         CodeHintManager.registerHintProvider(jsHints, ["javascript"], 0);
-        console.log("JSHints");
 
         // for unit testing
         exports.jsHintProvider = jsHints;
