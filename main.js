@@ -33,6 +33,10 @@ define(function (require, exports, module) {
         AppInit                 = brackets.getModule("utils/AppInit"),
         Scope                   = require("scope").Scope;
 
+    var MODE_NAME = "javascript",
+        EVENT_TAG = "brackets-js-hints",
+        SCOPE_MSG_TYPE = "outerScope";
+
     var sessionEditor       = null,  // editor object for the current hinting session
         $deferredHintObj    = null,  // deferred hint object
         innerScopePending   = null,  // was an inner scope request delayed waiting for an outer scope?
@@ -166,7 +170,7 @@ define(function (require, exports, module) {
                 outerWorkerActive = true; // the outer scope worker is active
                 outerScopeDirty = false; // the file is clean since the last outer scope request
                 outerScopeWorker.postMessage({
-                    type        : "outerScope",
+                    type        : SCOPE_MSG_TYPE,
                     path        : sessionEditor.document.file.fullPath,
                     text        : sessionEditor.document.getText()
                 });
@@ -380,7 +384,6 @@ define(function (require, exports, module) {
                 if (outerScope) {
                     return _getHintObj();
                 } else {
-                    console.log("Deferring hints...");
                     if (!$deferredHintObj || $deferredHintObj.isRejected()) {
                         $deferredHintObj = $.Deferred();
                     }
@@ -455,13 +458,15 @@ define(function (require, exports, module) {
                 return;
             }
 
-            $(editor)
-                .on("change.brackets-js-hints", function () {
-                    outerScopeDirty = true;
-                    _refreshOuterScope();
-                });
+            if (editor.getModeForSelection() === "javascript") {
+                $(editor)
+                    .on("change." + EVENT_TAG, function () {
+                        outerScopeDirty = true;
+                        _refreshOuterScope();
+                    });
 
-            _refreshEditor(editor);
+                _refreshEditor(editor);
+            }
         }
 
         /*
@@ -469,14 +474,14 @@ define(function (require, exports, module) {
          */
         function uninstallEditorListeners(editor) {
             $(editor)
-                .off("change.brackets-js-hints");
+                .off("change." + EVENT_TAG);
         }
 
         outerScopeWorker.addEventListener("message", function (e) {
             var response = e.data,
                 type = response.type;
 
-            if (type === "outerScope") {
+            if (type === SCOPE_MSG_TYPE) {
                 handleOuterScope(response);
             } else {
                 console.log("Worker: " + (response.log || response));
