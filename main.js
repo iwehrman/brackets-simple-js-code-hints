@@ -44,6 +44,7 @@ define(function (require, exports, module) {
         innerScope          = null,  // the inner-most scope returned by the query worker
         identifiers         = null,  // identifiers in the local scope
         properties          = null,  // properties sorted by position
+        allGlobals          = null,  // all global variables
         allIdentifiers      = null,  // all identifiers from the outer scope
         allProperties       = null,  // all properties from the outer scope
         outerScope          = null,  // the outer-most scope returned by the parser worker
@@ -131,7 +132,7 @@ define(function (require, exports, module) {
                 return $hintObj;
             });
         }
-        
+
         var cursor = sessionEditor.getCursorPos(),
             cm = sessionEditor._codeMirror,
             token = cm.getTokenAt(cursor),
@@ -258,7 +259,7 @@ define(function (require, exports, module) {
             } else {
                 innerScopePending = null;
                 innerScopeDirty = false;
-                
+
                 innerScope = outerScope.findChild(offset);
                 if (innerScope) {
                     // FIXME: This could be more efficient if instead of filtering
@@ -267,6 +268,7 @@ define(function (require, exports, module) {
                     // accumulated position information.
                     identifiers = filterByScope(allIdentifiers, innerScope);
                     identifiers.sort(compareScopes(innerScope, offset));
+                    identifiers = identifiers.concat(allGlobals);
                     properties = allProperties.slice(0).sort(comparePositions(offset));
                 } else {
                     identifiers = [];
@@ -292,6 +294,9 @@ define(function (require, exports, module) {
 
         if (!sessionEditor ||
                 sessionEditor.document.file.fullPath !== newFilename) {
+            allGlobals = null;
+            allProperties = null;
+            allIdentifiers = null;
             identifiers = null;
             properties = null;
             innerScope = null;
@@ -341,7 +346,7 @@ define(function (require, exports, module) {
         var cursor      = editor.getCursorPos(),
             token       = editor._codeMirror.getTokenAt(cursor),
             newFilename = editor.document.file.fullPath;
-        
+
         if ((key === null) || _maybeIdentifier(key)) {
             // don't autocomplete within strings or comments, etc.
             if (_hintableTokenClass(token)) {
@@ -436,6 +441,7 @@ define(function (require, exports, module) {
 
             if (response.success) {
                 outerScope = new Scope(response.scope);
+                allGlobals = response.globals;
                 allIdentifiers = response.identifiers;
                 allProperties = response.properties;
                 innerScopeDirty = true;
@@ -487,7 +493,7 @@ define(function (require, exports, module) {
                 console.log("Worker: " + (response.log || response));
             }
         });
-                
+
         // uninstall/install change listner as the active editor changes
         $(EditorManager)
             .on("activeEditorChange.brackets-js-hints",
