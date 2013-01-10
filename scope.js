@@ -314,29 +314,35 @@ define(function (require, exports, module) {
     Scope.prototype._addChild = function (tree) {
         var child = new Scope(tree, this), i = 0;
         
-        for (; i < this.children.length &&
-            child.range.start > this.children[i].range.end; i++);
+        while (i < this.children.length &&
+                child.range.start > this.children[i].range.end) {
+            i++;
+        }
         this.children.splice(i, 0, child);
-        return child; 
+        return child;
     };
     
     Scope.prototype.findChild = function (pos) {
+        var i;
+        
         if (this.range.start <= pos && pos < this.range.end) {
-            for (var i = 0; i < this.children.length; i++) {
+            for (i = 0; i < this.children.length; i++) {
                 if (this.children[i].range.start <= pos &&
                         pos < this.children[i].range.end) {
                     return this.children[i].findChild(pos);
                 }
             }
             // if no child has a matching range, this is the most precise scope
-            return this; 
+            return this;
         } else {
-            return null; 
+            return null;
         }
     };
     
     Scope.prototype.member = function (sym) {
-        for (var i = 0; i < this.identifiers.length; i++) {
+        var i;
+        
+        for (i = 0; i < this.identifiers.length; i++) {
             if (this.identifiers[i].name === sym) {
                 return true;
             }
@@ -345,8 +351,9 @@ define(function (require, exports, module) {
     };
     
     Scope.prototype.contains = function (sym) {
-        var depth = 0;
-        var child = this; 
+        var depth = 0,
+            child = this;
+        
         do {
             if (child.member(sym)) {
                 return depth;
@@ -354,13 +361,15 @@ define(function (require, exports, module) {
                 child = child.parent;
                 depth++;
             }
-        } while (child != null);
+        } while (child !== null);
+        
         return undefined;
     };
     
     Scope.prototype.getAllIdentifiers = function () {
-        var ids = [];
-        var scope = this; 
+        var ids = [],
+            scope = this;
+        
         do {
             ids = ids.concat(this.identifiers);
             scope = scope.parent;
@@ -368,18 +377,19 @@ define(function (require, exports, module) {
         return ids;
     };
     
-    Scope.prototype.toStringBelow = function() {
-        return "[" + this.range.start + " " + this.identifiers.map(function (i) { 
-                        return i.name; }).join(", ") + 
-                " : " + (this.children.map(function (c) { 
-                        return c.toString() }).join("; ")) + 
-                this.range.end + "]";
+    Scope.prototype.toStringBelow = function () {
+        return "[" + this.range.start + " " + this.identifiers.map(function (i) {
+            return i.name;
+        }).join(", ") +
+            " : " + (this.children.map(function (c) {
+                return c.toString();
+            }).join("; ")) + this.range.end + "]";
     };
      
-    Scope.prototype.toString = function() {
-        return "[" + this.range.start + " " + this.identifiers.map(function (i) { 
-                        return i.name; }).join(", ") + 
-                this.range.end + "]";
+    Scope.prototype.toString = function () {
+        return "[" + this.range.start + " " + this.identifiers.map(function (i) {
+            return i.name;
+        }).join(", ") + this.range.end + "]";
     };
 
     Scope.prototype.containsPosition = function (pos) {
@@ -405,7 +415,7 @@ define(function (require, exports, module) {
     };
     
     Scope.prototype.walkDown = function (add, init, prop) {
-        var result = init, 
+        var result = init,
             i;
         
         for (i = 0; i < this[prop].length; i++) {
@@ -417,24 +427,24 @@ define(function (require, exports, module) {
         }
         
         return result;
-    }
+    };
         
     Scope.prototype.walkDownIdentifiers = function (add, init) {
         return this.walkDown(add, init, 'identifiers');
-    }
+    };
 
     Scope.prototype.walkDownProperties = function (add, init) {
         return this.walkDown(add, init, 'properties');
-    }
-        
+    };
+    
     Scope.prototype.walkUp = function (add, init, prop) {
-        var scope = this, 
-            result = init, 
+        var scope = this,
+            result = init,
             i;
         
         while (scope !== null) {
             for (i = 0; i < this[prop].length; i++) {
-                result = add(result, this[prop][i]);   
+                result = add(result, this[prop][i]);
             }
             scope = scope.parent;
         }
