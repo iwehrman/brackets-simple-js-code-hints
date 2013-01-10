@@ -24,11 +24,6 @@
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
 /*global self, importScripts, esprima */
 
-function define(f) {
-    'use strict';
-    f(null, self, null);
-}
-
 (function () {
     'use strict';
 
@@ -38,6 +33,10 @@ function define(f) {
         self.postMessage({log: msg });
     }
     
+    /**
+     * Walk the scope to find all the objects of a given type, along with a
+     * list of their positions in the file.
+     */
     function sift(scope, type) {
         var positions,
             results = [],
@@ -66,7 +65,10 @@ function define(f) {
         return results;
     }
     
-    function parse(text, newpath) {
+    /**
+     * Use Esprima to parse a JavaScript text
+     */
+    function parse(text) {
         try {
             var ast = esprima.parse(text, {
                 range       : true,
@@ -77,21 +79,22 @@ function define(f) {
             }
             return new self.Scope(ast);
         } catch (err) {
-            _log("Parsing failed: " + err);
+            // _log("Parsing failed: " + err);
             return null;
         }
     }
     
     self.addEventListener("message", function (e) {
-        var type = e.data.type;
-        
+        var request = e.data,
+            type = request.type;
+
         if (type === "outerScope") {
-            var text    = e.data.text,
-                newpath = e.data.path,
-                scope = parse(text, newpath),
+            var text    = request.text,
+                newpath = request.path,
+                scope = parse(text),
                 identifiers = scope ? sift(scope, 'identifiers') : null,
                 properties = scope ? sift(scope, 'properties') : null,
-                result  = {
+                respose  = {
                     type        : type,
                     path        : newpath,
                     scope       : scope,
@@ -100,9 +103,17 @@ function define(f) {
                     success     : !!scope
                 };
             
-            self.postMessage(result);
+            self.postMessage(respose);
         } else {
             _log("Unknown message: " + JSON.stringify(e.data));
         }
     });
 }());
+
+/*
+ * Used by the Web Worker-specific importScripts operation
+ */
+function define(f) {
+    'use strict';
+    f(null, self, null);
+}
