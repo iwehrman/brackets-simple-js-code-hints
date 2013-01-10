@@ -33,7 +33,7 @@ define(function (require, exports, module) {
         AppInit                 = brackets.getModule("utils/AppInit"),
         Scope                   = require("scope").Scope;
 
-    var sessionEditor       = null,
+    var sessionEditor       = null,  // editor object for the current hinting session
         deferredHintObj     = null,  // deferred hint object
         innerScopePending   = null,  // was an inner scope request delayed waiting for an outer scope?
         innerScopeDirty     = true,  // has the outer scope changed since the last inner scope request?
@@ -50,104 +50,92 @@ define(function (require, exports, module) {
             return new Worker(path + "parser-worker.js");
         }());
 
-    function _maybeIdentifier(key) {
-        return (/[0-9a-z_.\$]/i).test(key);
-    }
-
-    function _okTokenClass(token) {
-        switch (token.className) {
-        case "string":
-        case "comment":
-        case "number":
-        case "regexp":
-            return false;
-        default:
-            return true;
-        }
-    }
-    
-    function _highlightQuery(hints, query) {
-        return hints.map(function (token) {
-            var hint = token.value,
-                index = hint.indexOf(query),
-                $hintObj = $('<span>');
-            
-            if (index >= 0) {
-                $hintObj.append(hint.slice(0, index))
-                    .append($('<span>')
-                            .append(hint.slice(index, index + query.length))
-                            .css('font-weight', 'bold'))
-                    .append(hint.slice(index + query.length));
-            } else {
-                $hintObj.text(hint);
-            }
-            $hintObj.data('hint', hint);
-            
-            switch (token.level) {
-            case 0:
-                $hintObj.css('color', 'rgb(0,100,0)');
-                break;
-            case 1:
-                $hintObj.css('color', 'rgb(100,100,0)');
-                break;
-            case 2:
-                $hintObj.css('color', 'rgb(0,0,100)');
-                break;
-            }
-
-            return $hintObj;
-        });
-    }
-
-    function _filterWithQuery(tokens, query) {
-        var i,
-            hints = tokens.filter(function (token) {
-                return (token.value.indexOf(query) === 0);
-            });
-        
-        // remove current possibly incomplete token
-        for (i = 0; i < hints.length; i++) {
-            if (hints[i].value === query) {
-                hints.splice(i, 1);
-                break;
-            }
-        }
-        
-        return hints;
-    }
-
-    function _filterByScope(tokens, scope) {
-        return tokens.filter(function (id) {
-            var level = scope.contains(id.value);
-            if (level >= 0) {
-                id.level = level;
-                return true;
-            } else {
-                return false;
-            }
-        });
-    }
-
+    /**
+     * Creates a hint response object
+     */
     function _getHintObj() {
+
+        /*
+         * Get the token before the one at the given cursor
+         */
+        function getPreviousToken(cm, cursor) {
+            var doc = sessionEditor.document;
+
+            if (cursor.ch > 0) {
+                return cm.getTokenAt({ch: cursor.ch - 1,
+                                      line: cursor.line});
+            } else if (cursor.ch === 0 && cursor.line > 0) {
+                return cm.getTokenAt({ch: doc.getLine(cursor.line - 1).length,
+                                      line: cursor.line - 1});
+            }
+
+            return null;
+        }
+
+        /*
+         * Filter a list of tokens using a given query string
+         */
+        function filterWithQuery(tokens, query) {
+            var i,
+                hints = tokens.filter(function (token) {
+                    return (token.value.indexOf(query) === 0);
+                });
+            
+            // remove current possibly incomplete token
+            for (i = 0; i < hints.length; i++) {
+                if (hints[i].value === query) {
+                    hints.splice(i, 1);
+                    break;
+                }
+            }
+            
+            return hints;
+        }
+
+        /*
+         * Returns a formatted list of hints with the query substring highlighted
+         */
+        function formatHints(hints, query) {
+            return hints.map(function (token) {
+                var hint = token.value,
+                    index = hint.indexOf(query),
+                    $hintObj = $('<span>');
+
+                if (index >= 0) {
+                    $hintObj.append(hint.slice(0, index))
+                        .append($('<span>')
+                                .append(hint.slice(index, index + query.length))
+                                .css('font-weight', 'bold'))
+                        .append(hint.slice(index + query.length));
+                } else {
+                    $hintObj.text(hint);
+                }
+                $hintObj.data('hint', hint);
+
+                switch (token.level) {
+                case 0:
+                    $hintObj.css('color', 'rgb(0,100,0)');
+                    break;
+                case 1:
+                    $hintObj.css('color', 'rgb(100,100,0)');
+                    break;
+                case 2:
+                    $hintObj.css('color', 'rgb(0,0,100)');
+                    break;
+                }
+
+                return $hintObj;
+            });
+        }
+        
         var cursor = sessionEditor.getCursorPos(),
             cm = sessionEditor._codeMirror,
-            doc = sessionEditor.document,
             token = cm.getTokenAt(cursor),
             query = (token && token.string) ?
                     (token.string === "." ? "" : token.string.trim()) : "",
-            prevToken,
+            prevToken = getPreviousToken(cm, cursor),
             hints;
         
-        if (cursor.ch > 0) {
-            prevToken = cm.getTokenAt({ch: cursor.ch - 1,
-                                                line: cursor.line});
-        } else if (cursor.ch === 0 && cursor.line > 0) {
-            
-            prevToken = cm.getTokenAt({ch: doc.getLine(cursor.line - 1).length,
-                                                line: cursor.line - 1});
-        } else {
-            prevToken = null;
-        }
         
         console.log("Token: '" + token.string + "'");
         console.log("Prev: '" + (prevToken ? prevToken.string : "(null)") + "'");
@@ -155,30 +143,21 @@ define(function (require, exports, module) {
         
         if ((token && (token.string === "." || token.className === "property")) ||
                 (prevToken && prevToken.string.indexOf(".") >= 0)) {
-            hints = _filterWithQuery(properties, query);
+            hints = filterWithQuery(properties, query);
         } else {
-            hints = _filterWithQuery(identifiers, query);
+            hints = filterWithQuery(identifiers, query);
         }
         
         return {
-            hints: _highlightQuery(hints, query),
+            hints: formatHints(hints, query),
             match: null,
             selectInitial: true
         };
     }
 
-    function _requestOuterScope() {
-        console.log("Requesting outer scope...");
-        outerWorkerActive = true; // the outer scope worker is active
-        outerScopeDirty = false; // the file is clean since the last outer scope request
-        
-        outerScopeWorker.postMessage({
-            type        : "outerScope",
-            path        : sessionEditor.document.file.fullPath,
-            text        : sessionEditor.document.getText()
-        });
-    }
-
+    /**
+     * Request a new outer scope object from the parser worker, if necessary
+     */
     function _refreshOuterScope() {
         // if there is not yet an outer scope or if the file has changed then
         // we might need to update the outer scope
@@ -186,16 +165,45 @@ define(function (require, exports, module) {
             console.log("Refreshing outer scope...");
             if (!outerWorkerActive) {
                 // and maybe if some time has passed without parsing... 
-                _requestOuterScope();
+                console.log("Requesting outer scope...");
+                outerWorkerActive = true; // the outer scope worker is active
+                outerScopeDirty = false; // the file is clean since the last outer scope request
+                outerScopeWorker.postMessage({
+                    type        : "outerScope",
+                    path        : sessionEditor.document.file.fullPath,
+                    text        : sessionEditor.document.getText()
+                });
             } else {
                 console.log("Outer scope request already in progress.");
             }
         }
     }
-            
-    function _newInnerScope(offset) {
 
-        function _comparePositions(pos) {
+    /**
+     * Recompute the inner scope for a given offset, if necessary
+     */
+    function _refreshInnerScope(offset) {
+
+        /*
+         * Filter a list of tokens using a given scope object
+         */
+        function filterByScope(tokens, scope) {
+            return tokens.filter(function (id) {
+                var level = scope.contains(id.value);
+                if (level >= 0) {
+                    id.level = level;
+                    return true;
+                } else {
+                    return false;
+                }
+            });
+        }
+
+        /*
+         * Comparator for sorting tokens according to minimum distance from
+         * a given position
+         */
+        function comparePositions(pos) {
             function mindist(pos, t) {
                 var dist = Math.abs(t.positions[0] - pos),
                     i,
@@ -215,14 +223,18 @@ define(function (require, exports, module) {
             };
         }
 
-        function _compareScopes(scope, pos) {
+        /*
+         * Comparator for sorting tokens lexicographically according to scope
+         * and then minimum distance from a given position
+         */
+        function compareScopes(scope, pos) {
             return function (a, b) {
                 var adepth = scope.contains(a.value);
                 var bdepth = scope.contains(b.value);
 
                 if (adepth === bdepth) {
                     // sort symbols at the same scope depth
-                    return _comparePositions(pos)(a, b);
+                    return comparePositions(pos)(a, b);
                 } else if (adepth !== null && bdepth !== null) {
                     return adepth - bdepth;
                 } else {
@@ -235,29 +247,6 @@ define(function (require, exports, module) {
             };
         }
 
-        if (innerScope) {
-            identifiers = _filterByScope(allIdentifiers, innerScope);
-            identifiers.sort(_compareScopes(innerScope, offset));
-            properties = allProperties.slice(0).sort(_comparePositions(offset));
-
-            if (deferredHintObj !== null) {
-                deferredHintObj.resolveWith(null, [_getHintObj()]);
-                deferredHintObj = null;
-                console.log("Deferred hints resolved.");
-            }
-        } else {
-            identifiers = null;
-            properties = null;
-            console.log("Inner scope failure.");
-            if (deferredHintObj !== null) {
-                deferredHintObj.reject();
-                deferredHintObj = null;
-                console.log("Deferred hints rejected.");
-            }
-        }
-    }
-
-    function _refreshInnerScope(offset) {
         // if there is not yet an inner scope, or if the outer scope has 
         // changed, or if the inner scope is invalid w.r.t. the current cursor
         // position we might need to update the inner scope
@@ -272,40 +261,35 @@ define(function (require, exports, module) {
                 innerScopePending = null;
                 innerScopeDirty = false;
                 innerScope = outerScope.findChild(offset);
-                _newInnerScope(offset);
+                
+                if (innerScope) {
+                    identifiers = filterByScope(allIdentifiers, innerScope);
+                    identifiers.sort(compareScopes(innerScope, offset));
+                    properties = allProperties.slice(0).sort(comparePositions(offset));
+
+                    if (deferredHintObj !== null) {
+                        deferredHintObj.resolveWith(null, [_getHintObj()]);
+                        deferredHintObj = null;
+                        console.log("Deferred hints resolved.");
+                    }
+                } else {
+                    identifiers = null;
+                    properties = null;
+                    console.log("Inner scope failure.");
+                    if (deferredHintObj !== null) {
+                        deferredHintObj.reject();
+                        deferredHintObj = null;
+                        console.log("Deferred hints rejected.");
+                    }
+                }
             }
         }
     }
 
-    function _handleOuterScope(response) {
-        var type = response.type;
-        
-        if (type === "outerScope") {
-            console.log("Outer scope request complete.");
-            outerWorkerActive = false;
-            
-            if (response.success) {
-                outerScope = new Scope(response.scope);
-                allIdentifiers = response.identifiers;
-                allProperties = response.properties;
-                innerScopeDirty = true;
-                console.log("Outer scope updated.");
-                
-                if (outerScopeDirty) {
-                    _refreshOuterScope();
-                }
-                
-                if (innerScopePending !== null) {
-                    _refreshInnerScope(innerScopePending);
-                }
-            } else {
-                console.log("Outer scope failure.");
-            }
-        } else {
-            console.log("Worker: " + (response.log || response));
-        }
-    }
-
+    /**
+     * Reset and recompute the scope and hinting information for the given
+     * editor
+     */
     function _refreshEditor(editor) {
         var newFilename = editor.document.file.fullPath;
 
@@ -325,23 +309,26 @@ define(function (require, exports, module) {
         _refreshOuterScope();
     }
 
-    function _installEditorListeners(editor) {
-        if (!editor) {
-            return;
-        }
-        
-        $(editor)
-            .on("change.brackets-js-hints", function () {
-                outerScopeDirty = true;
-                _refreshOuterScope();
-            });
-        
-        _refreshEditor(editor);
+    /**
+     * Is the string key perhaps a valid JavaScript identifier?
+     */
+    function _maybeIdentifier(key) {
+        return (/[0-9a-z_.\$]/i).test(key);
     }
-    
-    function _uninstallEditorListeners(editor) {
-        $(editor)
-            .off("change.brackets-js-hints");
+
+    /**
+     * Is the token's class hintable?
+     */
+    function _hintableTokenClass(token) {
+        switch (token.className) {
+        case "string":
+        case "comment":
+        case "number":
+        case "regexp":
+            return false;
+        default:
+            return true;
+        }
     }
 
     /**
@@ -360,7 +347,7 @@ define(function (require, exports, module) {
         
         if ((key === null) || _maybeIdentifier(key)) {
             // don't autocomplete within strings or comments, etc.
-            if (_okTokenClass(token)) {
+            if (_hintableTokenClass(token)) {
                 _refreshEditor(editor);
                 return true;
             }
@@ -368,6 +355,10 @@ define(function (require, exports, module) {
         return false;
     };
 
+    /** 
+      * Return a list of hints, possibly deferred, for the current editor 
+      * context
+      */
     JSHints.prototype.getHints = function (key) {
         var cursor = sessionEditor.getCursorPos(),
             hints,
@@ -391,7 +382,7 @@ define(function (require, exports, module) {
         if (_maybeIdentifier(key)) {
             token = sessionEditor._codeMirror.getTokenAt(cursor);
 
-            if (token && _okTokenClass(token)) {
+            if (token && _hintableTokenClass(token)) {
 
                 var offset = _cursorOffset(sessionEditor.document, cursor);
                 _refreshInnerScope(offset);
@@ -446,19 +437,78 @@ define(function (require, exports, module) {
     
     // load the extension
     AppInit.appReady(function () {
+
+        /*
+         * Receive an outer scope object from the parser worker
+         */
+        function handleOuterScope(response) {
+            console.log("Outer scope request complete.");
+            outerWorkerActive = false;
+
+            if (response.success) {
+                outerScope = new Scope(response.scope);
+                allIdentifiers = response.identifiers;
+                allProperties = response.properties;
+                innerScopeDirty = true;
+                console.log("Outer scope updated.");
+
+                if (outerScopeDirty) {
+                    _refreshOuterScope();
+                }
+
+                if (innerScopePending !== null) {
+                    _refreshInnerScope(innerScopePending);
+                }
+            } else {
+                console.log("Outer scope failure.");
+            }
+        }
+
+        /*
+         * Install editor change listeners to keep the outer scope fresh
+         */
+        function installEditorListeners(editor) {
+            if (!editor) {
+                return;
+            }
+
+            $(editor)
+                .on("change.brackets-js-hints", function () {
+                    outerScopeDirty = true;
+                    _refreshOuterScope();
+                });
+
+            _refreshEditor(editor);
+        }
+
+        /*
+         * Uninstall editor change listeners
+         */
+        function uninstallEditorListeners(editor) {
+            $(editor)
+                .off("change.brackets-js-hints");
+        }
+
         outerScopeWorker.addEventListener("message", function (e) {
-            _handleOuterScope(e.data);
+            var response = e.data,
+                type = response.type;
+
+            if (type === "outerScope") {
+                handleOuterScope(response);
+            } else {
+                console.log("Worker: " + (response.log || response));
+            }
         });
                 
         // uninstall/install change listner as the active editor changes
         $(EditorManager)
             .on("activeEditorChange.brackets-js-hints",
                 function (event, current, previous) {
-                    _uninstallEditorListeners(previous);
-                    _installEditorListeners(current);
+                    uninstallEditorListeners(previous);
+                    installEditorListeners(current);
                 });
 
-        _installEditorListeners(EditorManager.getActiveEditor());
+        installEditorListeners(EditorManager.getActiveEditor());
 
         var jsHints = new JSHints();
         CodeHintManager.registerHintProvider(jsHints, ["javascript"], 0);
