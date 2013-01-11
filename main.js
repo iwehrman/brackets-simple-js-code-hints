@@ -81,14 +81,14 @@ define(function (require, exports, module) {
          * Calculate a query string relative to the current cursor position
          * and token.
          */
-        function getQuery(cursor, token) {
-            var query;
-            if (token && token.string) {
+        function getQuery(cursor, token, prevToken, nextToken) {
+            var query = "";
+            if (token) {
                 if (token.string !== ".") {
-                    return token.string.substring(0, (cursor.ch - token.start)).trim();
+                    query = token.string.substring(0, token.string.length - (token.end - cursor.ch));
                 }
             }
-            return "";
+            return query.trim();
         }
 
         /*
@@ -99,15 +99,7 @@ define(function (require, exports, module) {
                 hints = tokens.filter(function (token) {
                     return (token.value.indexOf(query) === 0);
                 });
-            
-            // remove current possibly incomplete token
-            for (i = 0; i < hints.length; i++) {
-                if (hints[i].value === query) {
-                    hints.splice(i, 1);
-                    break;
-                }
-            }
-            
+
             return hints;
         }
 
@@ -419,6 +411,24 @@ define(function (require, exports, module) {
      * @param {string} hint - text to insert into current code editor
      */
     JSHints.prototype.insertHint = function (hint) {
+
+        /*
+         * Get the token after the one at the given cursor
+         */
+        function getNextToken(cm, cursor) {
+            var doc = sessionEditor.document,
+                line = doc.getLine(cursor.line);
+
+            if (cursor.ch < line.length) {
+                return cm.getTokenAt({ch: cursor.ch + 1,
+                                      line: cursor.line});
+            } else if (doc.getLine(cursor.line + 1)) {
+                return cm.getTokenAt({ch: 0, line: cursor.line + 1});
+            } else {
+                return null;
+            }
+        }
+
         var completion = hint.data('hint'),
             cm = sessionEditor._codeMirror,
             cursor = sessionEditor.getCursorPos(),
@@ -426,16 +436,14 @@ define(function (require, exports, module) {
             offset = 0;
 
         token = cm.getTokenAt(cursor);
+        if (!token || token.string === "." || token.string.trim() === "") {
+            token = getNextToken(cm, cursor);
+        }
+
         if (token) {
-
-            if (token.string.lastIndexOf(".") === token.string.length - 1) {
-                offset = token.string.length;
-            }
-
             cm.replaceRange(completion,
-                            {line: cursor.line, ch: token.start + offset},
+                            {line: cursor.line, ch: token.start},
                             {line: cursor.line, ch: token.end});
-
             outerScopeDirty = true;
             _refreshOuterScope();
         }
