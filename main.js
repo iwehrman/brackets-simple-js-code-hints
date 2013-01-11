@@ -437,10 +437,7 @@ define(function (require, exports, module) {
             start = {line: cursor.line, ch: token.start},
             end = {line: cursor.line, ch: token.end};
 
-        if (token.string === ".") {
-            start.ch = nextToken.start;
-            end.ch = nextToken.end;
-        } else if (token.string.trim() === "") {
+        if (token.string === "." || token.string.trim() === "") {
             if (nextToken.string.trim() === "" || !_hintableTokenClass(nextToken)) {
                 start.ch = cursor.ch;
                 end.ch = cursor.ch;
@@ -456,7 +453,7 @@ define(function (require, exports, module) {
 
         return false;
     };
-    
+
     // load the extension
     AppInit.appReady(function () {
 
