@@ -432,21 +432,27 @@ define(function (require, exports, module) {
         var completion = hint.data('hint'),
             cm = sessionEditor._codeMirror,
             cursor = sessionEditor.getCursorPos(),
-            token,
-            offset = 0;
+            token = cm.getTokenAt(cursor),
+            nextToken = getNextToken(cm, cursor),
+            start = {line: cursor.line, ch: token.start},
+            end = {line: cursor.line, ch: token.end};
 
-        token = cm.getTokenAt(cursor);
-        if (!token || token.string === "." || token.string.trim() === "") {
-            token = getNextToken(cm, cursor);
+        if (token.string === ".") {
+            start.ch = nextToken.start;
+            end.ch = nextToken.end;
+        } else if (token.string.trim() === "") {
+            if (nextToken.string.trim() === "" || !_hintableTokenClass(nextToken)) {
+                start.ch = cursor.ch;
+                end.ch = cursor.ch;
+            } else {
+                start.ch = nextToken.start;
+                end.ch = nextToken.end;
+            }
         }
 
-        if (token) {
-            cm.replaceRange(completion,
-                            {line: cursor.line, ch: token.start},
-                            {line: cursor.line, ch: token.end});
-            outerScopeDirty = true;
-            _refreshOuterScope();
-        }
+        cm.replaceRange(completion, start, end);
+        outerScopeDirty = true;
+        _refreshOuterScope();
 
         return false;
     };
