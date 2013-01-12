@@ -465,6 +465,10 @@ define(function (require, exports, module) {
 
             if (response.success) {
                 outerScope = new Scope(response.scope);
+                // the outer scope should cover the entire file
+                outerScope.range.start = 0;
+                outerScope.range.end = sessionEditor.document.getText().length;
+
                 allGlobals = response.globals;
                 allIdentifiers = response.identifiers;
                 allProperties = response.properties;
