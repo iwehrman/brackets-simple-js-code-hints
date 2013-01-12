@@ -319,7 +319,7 @@ define(function (require, exports, module) {
         if (this.range.start <= pos && pos < this.range.end) {
             for (i = 0; i < this.children.length; i++) {
                 if (this.children[i].range.start <= pos &&
-                        pos < this.children[i].range.end) {
+                        pos <= this.children[i].range.end) {
                     return this.children[i].findChild(pos);
                 }
             }
@@ -358,7 +358,7 @@ define(function (require, exports, module) {
     };
     
     Scope.prototype.containsPosition = function (pos) {
-        return this.range.start <= pos && pos < this.range.end;
+        return this.range.start <= pos && pos <= this.range.end;
     };
     
     Scope.prototype.containsPositionImmediate = function (pos) {
