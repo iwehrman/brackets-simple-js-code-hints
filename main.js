@@ -21,15 +21,19 @@
  * 
  */
 
-/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
+/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50, forin: true */
 /*global define, brackets, CodeMirror, $, Worker */
 
 define(function (require, exports, module) {
     "use strict";
 
     var CodeHintManager         = brackets.getModule("editor/CodeHintManager"),
+        DocumentManager         = brackets.getModule("document/DocumentManager"),
         EditorManager           = brackets.getModule("editor/EditorManager"),
         EditorUtils             = brackets.getModule("editor/EditorUtils"),
+        FileUtils               = brackets.getModule("file/FileUtils"),
+        NativeFileSystem        = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
+        ProjectManager          = brackets.getModule("project/ProjectManager"),
         AppInit                 = brackets.getModule("utils/AppInit"),
         Scope                   = require("scope").Scope,
         KEYWORDS                = require("token").KEYWORDS;
@@ -45,12 +49,12 @@ define(function (require, exports, module) {
         innerScope          = null,  // the inner-most scope returned by the query worker
         identifiers         = null,  // identifiers in the local scope
         properties          = null,  // properties sorted by position
-        allGlobals          = null,  // all global variables
-        allIdentifiers      = null,  // all identifiers from the outer scope
-        allProperties       = null,  // all properties from the outer scope
-        outerScope          = null,  // the outer-most scope returned by the parser worker
-        outerScopeDirty     = true,  // has the file changed since the last outer scope request? 
-        outerWorkerActive   = false, // is the outer worker active? 
+        allGlobals          = {},    // dir -> file -> list of all global variables
+        allIdentifiers      = {},    // dir -> file -> list of all identifiers
+        allProperties       = {},    // dir -> file -> list of all properties
+        outerScope          = {},    // dir -> file -> outer-most scope
+        outerScopeDirty     = {},    // dir -> file -> has the path changed since the last outer scope request? 
+        outerWorkerActive   = {},    // dir -> file -> is the outer worker active for the path? 
         outerScopeWorker    = (function () {
             var path = module.uri.substring(0, module.uri.lastIndexOf("/") + 1);
             return new Worker(path + "parser-worker.js");
@@ -96,8 +100,7 @@ define(function (require, exports, module) {
          * Filter a list of tokens using a given query string
          */
         function filterWithQuery(tokens, query) {
-            var i,
-                hints = tokens.filter(function (token) {
+            var hints = tokens.filter(function (token) {
                     return (token.value.indexOf(query) === 0);
                 });
 
@@ -157,6 +160,9 @@ define(function (require, exports, module) {
         } else {
             hints = filterWithQuery(identifiers, query);
         }
+
+        // Truncate large hint lists for performance reasons
+        hints = hints.slice(0, 100);
         
         return {
             hints: formatHints(hints, query),
@@ -168,19 +174,56 @@ define(function (require, exports, module) {
     /**
      * Request a new outer scope object from the parser worker, if necessary
      */
-    function _refreshOuterScope() {
+    function _refreshOuterScope(dir, file) {
+                
+        // initialize outerScope, etc. at dir
+        if (!outerScope.hasOwnProperty(dir)) {
+            outerScope[dir] = {};
+        }
+        if (!outerScopeDirty.hasOwnProperty(dir)) {
+            outerScopeDirty[dir] = {};
+        }
+        if (!outerWorkerActive.hasOwnProperty(dir)) {
+            outerWorkerActive[dir] = {};
+        }
+        if (!allGlobals.hasOwnProperty(dir)) {
+            allGlobals[dir] = {};
+        }
+        if (!allIdentifiers.hasOwnProperty(dir)) {
+            allIdentifiers[dir] = {};
+        }
+        if (!allProperties.hasOwnProperty(dir)) {
+            allProperties[dir] = {};
+        }
+
+        // initialize outerScope[dir], etc. at file
+        if (!outerScope[dir].hasOwnProperty(file)) {
+            outerScope[dir][file] = null;
+        }
+        if (!outerScopeDirty[dir].hasOwnProperty(file)) {
+            outerScopeDirty[dir][file] = true;
+        }
+        if (!outerWorkerActive[dir].hasOwnProperty(file)) {
+            outerWorkerActive[dir][file] = false;
+        }
+       
         // if there is not yet an outer scope or if the file has changed then
         // we might need to update the outer scope
-        if (outerScope === null || outerScopeDirty) {
-            if (!outerWorkerActive) {
+        if (outerScope[dir][file] === null || outerScopeDirty[dir][file]) {
+            if (!outerWorkerActive[dir][file]) {
                 // and maybe if some time has passed without parsing... 
-                outerWorkerActive = true; // the outer scope worker is active
-                outerScopeDirty = false; // the file is clean since the last outer scope request
-                outerScopeWorker.postMessage({
-                    type        : SCOPE_MSG_TYPE,
-                    path        : sessionEditor.document.file.fullPath,
-                    text        : sessionEditor.document.getText(),
-                    force       : !outerScope
+                var path = dir + file,
+                    entry = new NativeFileSystem.FileEntry(path);
+                outerWorkerActive[dir][file] = true; // the outer scope worker is active
+                outerScopeDirty[dir][file] = false; // the file is clean since the last outer scope request
+                FileUtils.readAsText(entry).done(function (text) {
+                    outerScopeWorker.postMessage({
+                        type        : SCOPE_MSG_TYPE,
+                        dir         : dir,
+                        file        : file,
+                        text        : text,
+                        force       : !outerScope[dir][file]
+                    });
                 });
             }
         }
@@ -189,7 +232,7 @@ define(function (require, exports, module) {
     /**
      * Recompute the inner scope for a given offset, if necessary
      */
-    function _refreshInnerScope(offset) {
+    function _refreshInnerScope(dir, file, offset) {
 
         /*
          * Filter a list of tokens using a given scope object
@@ -210,9 +253,9 @@ define(function (require, exports, module) {
          * Comparator for sorting tokens according to minimum distance from
          * a given position
          */
-        function comparePositions(pos) {
+        function compareByPosition(pos) {
             function mindist(pos, t) {
-                var dist = Math.abs(t.positions[0] - pos),
+                var dist = t.positions.length ? Math.abs(t.positions[0] - pos) : Infinity,
                     i,
                     tmp;
 
@@ -234,14 +277,14 @@ define(function (require, exports, module) {
          * Comparator for sorting tokens lexicographically according to scope
          * and then minimum distance from a given position
          */
-        function compareScopes(scope, pos) {
+        function compareByScope(scope) {
             return function (a, b) {
                 var adepth = scope.contains(a.value);
                 var bdepth = scope.contains(b.value);
 
                 if (adepth === bdepth) {
                     // sort symbols at the same scope depth
-                    return comparePositions(pos)(a, b);
+                    return 0;
                 } else if (adepth !== null && bdepth !== null) {
                     return adepth - bdepth;
                 } else {
@@ -253,6 +296,102 @@ define(function (require, exports, module) {
                 }
             };
         }
+        
+        /*
+         * Comparator for sorting tokens by name
+         */
+        function compareByName(a, b) {
+            return a.value < b.value;
+        }
+        
+        /*
+         * Comparator for sorting tokens by path, such that
+         * a <= b if a.path === path
+         */
+        function compareByPath(path) {
+            return function (a, b) {
+                if (a.path === path) {
+                    if (b.path === path) {
+                        return 0;
+                    } else {
+                        return -1;
+                    }
+                } else {
+                    if (b.path === path) {
+                        return 1;
+                    } else {
+                        return 0;
+                    }
+                }
+            };
+        }
+        
+        /*
+         * Forms the lexicographical composition of comparators
+         */
+        function lexicographic(compare1, compare2) {
+            return function (a, b) {
+                var result = compare1(a, b);
+                if (result === 0) {
+                    return compare2(a, b);
+                } else {
+                    return result;
+                }
+            };
+        }
+        
+        /*
+         * A comparator for identifiers
+         */
+        function compareIdentifiers(scope, pos) {
+            return lexicographic(compareByScope(scope), compareByPosition(pos));
+        }
+        
+        /*
+         * A comparator for properties
+         */
+        function compareProperties(path) {
+            return lexicographic(compareByPath(path),
+                                 lexicographic(compareByPosition(offset),
+                                               compareByName));
+        }
+        
+        /*
+         * Combine properties from files in the current file's directory into
+         * one sorted list. 
+         */
+        function mergeProperties(properties, dir, file, offset) {
+            var uniqueprops = {},
+                otherprops = [],
+                otherfile,
+                propname;
+            
+            function addin(token) {
+                if (!Object.prototype.hasOwnProperty.call(uniqueprops, token.value)) {
+                    uniqueprops[token.value] = token;
+                }
+            }
+            
+            properties.forEach(addin);
+            
+            otherprops = allProperties[dir];
+            for (otherfile in otherprops) {
+                if (otherprops.hasOwnProperty(file)) {
+                    if (otherfile !== file) {
+                        otherprops[otherfile].forEach(addin);
+                    }
+                }
+            }
+            
+            otherprops = [];
+            for (propname in uniqueprops) {
+                if (Object.prototype.hasOwnProperty.call(uniqueprops, propname)) {
+                    otherprops.push(uniqueprops[propname]);
+                }
+            }
+            
+            return otherprops.sort(compareProperties(dir + file));
+        }
 
         // if there is not yet an inner scope, or if the outer scope has 
         // changed, or if the inner scope is invalid w.r.t. the current cursor
@@ -260,32 +399,42 @@ define(function (require, exports, module) {
         if (innerScope === null || innerScopeDirty ||
                 !innerScope.containsPositionImmediate(offset)) {
 
-            if (outerScope === null) {
+            if (!outerScope[dir] || !outerScope[dir][file]) {
                 innerScopePending = offset;
-                _refreshOuterScope();
+                _refreshOuterScope(dir, file);
             } else {
-                if (outerWorkerActive) {
+                if (outerWorkerActive[dir][file]) {
                     innerScopePending = offset;
                 } else {
                     innerScopePending = null;
                 }
-                console.log("Inner scope");
                 innerScopeDirty = false;
-
-                innerScope = outerScope.findChild(offset);
+                
+                innerScope = outerScope[dir][file].findChild(offset);
+                if (!innerScope && outerScope[dir][file].range.end < offset) {
+                    // we may have failed to find a child scope because a 
+                    // character was added to the end of the file, outside of
+                    // the (now out-of-date and currently-being-updated) 
+                    // outer scope. Hence, if offset is greater than the range
+                    // of the outerScope, we manually set innerScope to the
+                    // outerScope
+                    innerScope = outerScope[dir][file];
+                }
+                
                 if (innerScope) {
                     // FIXME: This could be more efficient if instead of filtering
                     // the entire list of identifiers we just used the identifiers
                     // in the scope of innerScope, but that list doesn't have the
                     // accumulated position information.
-                    identifiers = filterByScope(allIdentifiers, innerScope);
-                    identifiers.sort(compareScopes(innerScope, offset));
-                    properties = allProperties.slice(0).sort(comparePositions(offset));
+                    var path = dir + "/" + file;
+                    identifiers = filterByScope(allIdentifiers[dir][file], innerScope);
+                    identifiers.sort(compareIdentifiers(innerScope, offset));
+                    properties = mergeProperties(allProperties[dir][file].slice(0), dir, file, offset);
                 } else {
                     identifiers = [];
                     properties = [];
                 }
-                identifiers = identifiers.concat(allGlobals);
+                identifiers = identifiers.concat(allGlobals[dir][file]);
                 identifiers = identifiers.concat(KEYWORDS);
 
                 if ($deferredHintObj !== null &&
@@ -297,25 +446,64 @@ define(function (require, exports, module) {
             }
         }
     }
+            
+    /**
+     * Divide a path into directory and filename parts
+     */
+    function _splitPath(path) {
+        var index   = path.lastIndexOf("/"),
+            dir     = path.substring(0, index),
+            file    = path.substring(index, path.length);
+        
+        return {dir: dir, file: file };
+    }
 
+    /**
+     * Refresh the outer scopes of the given file as well as of the other files
+     * in the given directory.
+     */
+    function _refreshFile(dir, file) {
+        var dirEntry = new NativeFileSystem.DirectoryEntry(dir),
+            reader   = dirEntry.createReader();
+        
+        reader.readEntries(function (entries) {
+            entries.forEach(function (entry) {
+                if (entry.isFile &&
+                        EditorUtils.getModeFromFileExtension(entry.fullPath) === MODE_NAME) {
+                    var path    = entry.fullPath,
+                        split   = _splitPath(path),
+                        dir     = split.dir,
+                        file    = split.file;
+                    
+                    _refreshOuterScope(dir, file);
+                }
+            });
+        }, function (err) {
+            console.log("Unable to refresh directory: " + err);
+            _refreshOuterScope(dir, file);
+        });
+    }
+            
     /**
      * Reset and recompute the scope and hinting information for the given
      * editor
      */
     function _refreshEditor(editor) {
-        var newFilename = editor.document.file.fullPath;
+        var path    = editor.document.file.fullPath,
+            split   = _splitPath(path),
+            dir     = split.dir,
+            file    = split.file;
 
         if (!sessionEditor ||
-                sessionEditor.document.file.fullPath !== newFilename) {
-            allGlobals = null;
-            allProperties = null;
-            allIdentifiers = null;
+                sessionEditor.document.file.fullPath !== path) {
             identifiers = null;
             properties = null;
             innerScope = null;
-            outerScope = null;
-            outerScopeDirty = true;
-            innerScopeDirty = true;
+            
+            if (!outerScopeDirty.hasOwnProperty(dir)) {
+                outerScopeDirty[dir] = {};
+            }
+            outerScopeDirty[dir][file] = true;
         }
         sessionEditor = editor;
 
@@ -324,7 +512,7 @@ define(function (require, exports, module) {
         }
         $deferredHintObj = null;
 
-        _refreshOuterScope();
+        _refreshFile(dir, file);
     }
 
     /**
@@ -356,6 +544,7 @@ define(function (require, exports, module) {
     }
 
     JSHints.prototype.hasHints = function (editor, key) {
+
         /*
          * Compute the cursor's offset from the beginning of the document
          */
@@ -373,13 +562,17 @@ define(function (require, exports, module) {
 
         if ((key === null) || _maybeIdentifier(key)) {
             var cursor      = editor.getCursorPos(),
-                token       = editor._codeMirror.getTokenAt(cursor),
-                offset;
+                token       = editor._codeMirror.getTokenAt(cursor);
 
             // don't autocomplete within strings or comments, etc.
-            if (_hintableTokenClass(token)) {
-                offset = _cursorOffset(sessionEditor.document, cursor);
-                _refreshInnerScope(offset);
+            if (token && _hintableTokenClass(token)) {
+                var path    = sessionEditor.document.file.fullPath,
+                    split   = _splitPath(path),
+                    dir     = split.dir,
+                    file    = split.file,
+                    offset  = _cursorOffset(sessionEditor.document, cursor);
+                
+                _refreshInnerScope(dir, file, offset);
                 return true;
             }
         }
@@ -396,7 +589,12 @@ define(function (require, exports, module) {
                 token  = sessionEditor._codeMirror.getTokenAt(cursor);
 
             if (token && _hintableTokenClass(token)) {
-                if (outerScope) {
+                var path    = sessionEditor.document.file.fullPath,
+                    split   = _splitPath(path),
+                    dir     = split.dir,
+                    file    = split.file;
+                
+                if (outerScope[dir] && outerScope[dir][file]) {
                     return _getHintObj();
                 } else {
                     if (!$deferredHintObj || $deferredHintObj.isRejected()) {
@@ -434,13 +632,17 @@ define(function (require, exports, module) {
             }
         }
 
-        var completion = hint.data('hint'),
-            cm = sessionEditor._codeMirror,
-            cursor = sessionEditor.getCursorPos(),
-            token = cm.getTokenAt(cursor),
-            nextToken = getNextToken(cm, cursor),
-            start = {line: cursor.line, ch: token.start},
-            end = {line: cursor.line, ch: token.end};
+        var completion  = hint.data('hint'),
+            cm          = sessionEditor._codeMirror,
+            path        = sessionEditor.document.file.fullPath,
+            split       = _splitPath(path),
+            dir         = split.dir,
+            file        = split.file,
+            cursor      = sessionEditor.getCursorPos(),
+            token       = cm.getTokenAt(cursor),
+            nextToken   = getNextToken(cm, cursor),
+            start       = {line: cursor.line, ch: token.start},
+            end         = {line: cursor.line, ch: token.end};
 
         if (token.string === "." || token.string.trim() === "") {
             if (nextToken.string.trim() === "" || !_hintableTokenClass(nextToken)) {
@@ -453,8 +655,7 @@ define(function (require, exports, module) {
         }
 
         cm.replaceRange(completion, start, end);
-        outerScopeDirty = true;
-
+        outerScopeDirty[dir][file] = true;
         return false;
     };
 
@@ -465,28 +666,42 @@ define(function (require, exports, module) {
          * Receive an outer scope object from the parser worker
          */
         function handleOuterScope(response) {
-            var currentFile = sessionEditor.document.file.fullPath;
+            var dir     = response.dir,
+                file    = response.file,
+                path    = response.path;
 
-            outerWorkerActive = false;
-            if (currentFile === response.path && response.success) {
-                outerScope = new Scope(response.scope);
-                // the outer scope should cover the entire file
-                outerScope.range.start = 0;
-                outerScope.range.end = sessionEditor.document.getText().length;
-
-                allGlobals = response.globals;
-                allIdentifiers = response.identifiers;
-                allProperties = response.properties;
-                innerScopeDirty = true;
-
-                if (outerScopeDirty) {
-                    _refreshOuterScope();
+            if (outerWorkerActive[dir][file]) {
+                outerWorkerActive[dir][file] = false;
+                if (response.success) {
+                    outerScope[dir][file] = new Scope(response.scope);
+                    
+                    // The outer scope should cover the entire file
+                    outerScope[dir][file].range.start = 0;
+                    outerScope[dir][file].range.end = response.length;
+                    
+                    allGlobals[dir][file] = response.globals;
+                    allIdentifiers[dir][file] = response.identifiers;
+                    allProperties[dir][file] = response.properties.map(function (p) {
+                        p.path = path;
+                        return p;
+                    });
+                    innerScopeDirty = true;
+    
+                    if (outerScopeDirty[dir][file]) {
+                        _refreshOuterScope(dir, file);
+                    }
+    
+                    if (innerScopePending !== null) {
+                        _refreshInnerScope(dir, file, innerScopePending);
+                    }
                 }
-
-                if (innerScopePending !== null) {
-                    _refreshInnerScope(innerScopePending);
-                }
+            } else {
+                console.log("Expired scope request: " + path);
             }
+        }
+        
+        function eventName(name) {
+            return name + "." + EVENT_TAG;
         }
 
         /*
@@ -496,12 +711,20 @@ define(function (require, exports, module) {
             if (!editor) {
                 return;
             }
+            
+            var path    = editor.document.file.fullPath,
+                split   = _splitPath(path),
+                dir     = split.dir,
+                file    = split.file;
 
-            if (editor.getModeForSelection() === "javascript") {
+            if (editor.getModeForSelection() === MODE_NAME) {
                 $(editor)
-                    .on("change." + EVENT_TAG, function () {
-                        outerScopeDirty = true;
-                        _refreshOuterScope();
+                    .on(eventName("change"), function () {
+                        if (!outerScopeDirty.hasOwnProperty(dir)) {
+                            outerScopeDirty[dir] = {};
+                        }
+                        outerScopeDirty[dir][file] = true;
+                        _refreshOuterScope(dir, file);
                     });
 
                 _refreshEditor(editor);
@@ -513,7 +736,7 @@ define(function (require, exports, module) {
          */
         function uninstallEditorListeners(editor) {
             $(editor)
-                .off("change." + EVENT_TAG);
+                .off(eventName("change") + EVENT_TAG);
         }
 
         outerScopeWorker.addEventListener("message", function (e) {
@@ -527,18 +750,63 @@ define(function (require, exports, module) {
             }
         });
 
-        // uninstall/install change listner as the active editor changes
+        // uninstall/install change listener as the active editor changes
         $(EditorManager)
-            .on("activeEditorChange." + EVENT_TAG,
+            .on(eventName("activeEditorChange") + EVENT_TAG,
                 function (event, current, previous) {
                     uninstallEditorListeners(previous);
                     installEditorListeners(current);
                 });
-
+        
+        // immediately install the current editor
         installEditorListeners(EditorManager.getActiveEditor());
+        
+        // reset state on project change
+        $(ProjectManager)
+            .on(eventName("beforeProjectClose") + EVENT_TAG,
+                function (event, projectRoot) {
+                    allGlobals          = {};
+                    allIdentifiers      = {};
+                    allProperties       = {};
+                    outerScope          = {};
+                    outerScopeDirty     = {};
+                    outerWorkerActive   = {};
+                });
+        
+        // relocate scope information on file rename
+        $(DocumentManager)
+            .on(eventName("fileNameChange") + EVENT_TAG,
+                function (event, oldname, newname) {
+                    var oldsplit    = _splitPath(oldname),
+                        olddir      = oldsplit.dir,
+                        oldfile     = oldsplit.file,
+                        newsplit    = _splitPath(newname),
+                        newdir      = newsplit.dir,
+                        newfile     = newsplit.file;
+
+                    /*
+                     * Move property obj[olddir][oldfile] to obj[newdir][newfile]
+                     */
+                    function moveProp(obj) {
+                        if (obj.hasOwnProperty(olddir) && obj[olddir].hasOwnProperty(oldfile)) {
+                            if (!obj.hasOwnProperty(newdir)) {
+                                obj[newdir] = {};
+                            }
+                            obj[newdir][newfile] = obj[olddir][oldfile];
+                            obj[olddir][oldfile] = null;
+                        }
+                    }
+                    
+                    moveProp(outerScope);
+                    moveProp(outerScopeDirty);
+                    moveProp(outerWorkerActive);
+                    moveProp(allGlobals);
+                    moveProp(allIdentifiers);
+                    moveProp(allProperties);
+                });
 
         var jsHints = new JSHints();
-        CodeHintManager.registerHintProvider(jsHints, ["javascript"], 0);
+        CodeHintManager.registerHintProvider(jsHints, [MODE_NAME], 0);
 
         // for unit testing
         exports.jsHintProvider = jsHints;

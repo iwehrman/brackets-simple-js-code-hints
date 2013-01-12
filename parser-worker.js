@@ -22,12 +22,13 @@
  */
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50, regexp: true */
-/*global self, importScripts, esprima */
+/*global self, importScripts, esprima, setTimeout */
 
 (function () {
     'use strict';
 
-    var MAX_RETRIES = 100;
+    var MAX_RETRIES = 100,
+        SCOPE_MSG_TYPE = "outerScope";
 
     importScripts('esprima/esprima.js', 'scope.js', 'token.js');
 
@@ -102,10 +103,30 @@
         return globals;
     }
 
+    function respond(dir, file, length, parseObj) {
+        var scope = parseObj ? parseObj.scope : null,
+            globals = parseObj ? parseObj.globals : null,
+            identifiers = parseObj ? sift(scope, 'identifiers') : null,
+            properties = parseObj ? sift(scope, 'properties') : null,
+            response  = {
+                type        : SCOPE_MSG_TYPE,
+                dir         : dir,
+                file        : file,
+                length      : length,
+                scope       : scope,
+                globals     : globals,
+                identifiers : identifiers,
+                properties  : properties,
+                success     : !!parseObj
+            };
+
+        self.postMessage(response);
+    }
+
     /**
      * Use Esprima to parse a JavaScript text
      */
-    function parse(text, retries) {
+    function parse(dir, file, text, retries) {
         try {
             var ast = esprima.parse(text, {
                 range       : true,
@@ -117,13 +138,12 @@
                 _log("Parse errors: " + JSON.stringify(ast.errors));
             }
 
-            return {
+            respond(dir, file, text.length, {
                 scope : new self.Scope(ast),
                 globals : extractGlobals(ast.comments)
-            };
+            });
         } catch (err) {
             // _log("Parsing failed: " + err + " at " + err.index);
-
             if (retries > 0) {
                 var lines = text.split("\n"),
                     lineno = Math.min(lines.length, err.lineNumber) - 1,
@@ -136,12 +156,15 @@
                         removed = lines.splice(lineno, 1, newline);
                         if (removed && removed.length > 0) {
                             // _log("Removed: '" + removed[0] + "'");
-                            return parse(lines.join("\n"), --retries, lineno);
+                            setTimeout(function () {
+                                parse(dir, file, text.length, lines.join("\n"), --retries);
+                            }, 0);
+                            return;
                         }
                     }
                 }
             }
-            return null;
+            respond(dir, file, text.length, null);
         }
     }
     
@@ -149,26 +172,12 @@
         var request = e.data,
             type = request.type;
 
-        if (type === "outerScope") {
-            var text    = request.text,
-                newpath = request.path,
-                retries = request.force ? MAX_RETRIES : 0,
-                parseObj = parse(text, retries),
-                scope = parseObj ? parseObj.scope : null,
-                globals = parseObj ? parseObj.globals : null,
-                identifiers = parseObj ? sift(scope, 'identifiers') : null,
-                properties = parseObj ? sift(scope, 'properties') : null,
-                response  = {
-                    type        : type,
-                    path        : newpath,
-                    scope       : scope,
-                    globals     : globals,
-                    identifiers : identifiers,
-                    properties  : properties,
-                    success     : !!parseObj
-                };
-
-            self.postMessage(response);
+        if (type === SCOPE_MSG_TYPE) {
+            var dir     = request.dir,
+                file    = request.file,
+                text    = request.text,
+                retries = request.force ? MAX_RETRIES : 0;
+            setTimeout(function () { parse(dir, file, text, retries); }, 0);
         } else {
             _log("Unknown message: " + JSON.stringify(request));
         }
