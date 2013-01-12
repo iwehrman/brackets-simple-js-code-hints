@@ -286,9 +286,6 @@ define(function (require, exports, module) {
                 _buildScope(obj, this);
             }
         }
-        if (this.parent === undefined) {
-            console.log("oops");
-        }
     }
     
     Scope.prototype.addIdentifier = function (id) {
