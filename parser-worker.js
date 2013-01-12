@@ -22,10 +22,12 @@
  */
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
-/*global self, importScripts, esprima */
+/*global self, importScripts, esprima, setTimeout */
 
 (function () {
     'use strict';
+
+    var SCOPE_MSG_TYPE = "outerScope";
 
     importScripts('esprima/esprima.js', 'scope.js');
 
@@ -209,10 +211,28 @@
         return globals;
     }
 
+    function respond(path, parseObj) {
+        var scope = parseObj ? parseObj.scope : null,
+            globals = parseObj ? parseObj.globals : null,
+            identifiers = parseObj ? sift(scope, 'identifiers') : null,
+            properties = parseObj ? sift(scope, 'properties') : null,
+            response  = {
+                type        : SCOPE_MSG_TYPE,
+                path        : path,
+                scope       : scope,
+                globals     : globals,
+                identifiers : identifiers,
+                properties  : properties,
+                success     : !!parseObj
+            };
+
+        self.postMessage(response);
+    }
+
     /**
      * Use Esprima to parse a JavaScript text
      */
-    function parse(text) {
+    function parse(text, path) {
         try {
             var ast = esprima.parse(text, {
                 range       : true,
@@ -223,13 +243,13 @@
                 _log("Parse errors: " + JSON.stringify(ast.errors));
             }
 
-            return {
+            respond(path, {
                 scope : new self.Scope(ast),
                 globals : extractGlobals(ast.comments)
-            };
+            });
         } catch (err) {
             // _log("Parsing failed: " + err);
-            return null;
+            respond(path, null);
         }
     }
     
@@ -237,25 +257,10 @@
         var request = e.data,
             type = request.type;
 
-        if (type === "outerScope") {
+        if (type === SCOPE_MSG_TYPE) {
             var text    = request.text,
-                newpath = request.path,
-                parseObj = parse(text),
-                scope = parseObj ? parseObj.scope : null,
-                globals = parseObj ? parseObj.globals : null,
-                identifiers = parseObj ? sift(scope, 'identifiers') : null,
-                properties = parseObj ? sift(scope, 'properties') : null,
-                response  = {
-                    type        : type,
-                    path        : newpath,
-                    scope       : scope,
-                    globals     : globals,
-                    identifiers : identifiers,
-                    properties  : properties,
-                    success     : !!parseObj
-                };
-
-            self.postMessage(response);
+                newpath = request.path;
+            setTimeout(function () { parse(text, newpath); }, 0);
         } else {
             _log("Unknown message: " + JSON.stringify(e.data));
         }
