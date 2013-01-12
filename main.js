@@ -178,7 +178,8 @@ define(function (require, exports, module) {
                 outerScopeWorker.postMessage({
                     type        : SCOPE_MSG_TYPE,
                     path        : sessionEditor.document.file.fullPath,
-                    text        : sessionEditor.document.getText()
+                    text        : sessionEditor.document.getText(),
+                    force       : !outerScope
                 });
             }
         }

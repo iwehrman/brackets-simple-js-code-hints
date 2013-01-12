@@ -21,11 +21,13 @@
  * 
  */
 
-/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
+/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50, regexp: true */
 /*global self, importScripts, esprima */
 
 (function () {
     'use strict';
+
+    var MAX_RETRIES = 100;
 
     importScripts('esprima/esprima.js', 'scope.js');
 
@@ -212,13 +214,14 @@
     /**
      * Use Esprima to parse a JavaScript text
      */
-    function parse(text) {
+    function parse(text, retries) {
         try {
             var ast = esprima.parse(text, {
                 range       : true,
                 tolerant    : true,
                 comment     : true
             });
+
             if (ast.errors.length > 0) {
                 _log("Parse errors: " + JSON.stringify(ast.errors));
             }
@@ -228,7 +231,25 @@
                 globals : extractGlobals(ast.comments)
             };
         } catch (err) {
-            // _log("Parsing failed: " + err);
+            // _log("Parsing failed: " + err + " at " + err.index);
+
+            if (retries > 0) {
+                var lines = text.split("\n"),
+                    lineno = Math.min(lines.length, err.lineNumber) - 1,
+                    newline,
+                    removed;
+
+                if (-1 < lineno < lines.length) {
+                    newline = lines[lineno].replace(/./g, " ");
+                    if (newline !== lines[lineno]) {
+                        removed = lines.splice(lineno, 1, newline);
+                        if (removed && removed.length > 0) {
+                            // _log("Removed: '" + removed[0] + "'");
+                            return parse(lines.join("\n"), --retries, lineno);
+                        }
+                    }
+                }
+            }
             return null;
         }
     }
@@ -240,7 +261,8 @@
         if (type === "outerScope") {
             var text    = request.text,
                 newpath = request.path,
-                parseObj = parse(text),
+                retries = request.force ? MAX_RETRIES : 0,
+                parseObj = parse(text, retries),
                 scope = parseObj ? parseObj.scope : null,
                 globals = parseObj ? parseObj.globals : null,
                 identifiers = parseObj ? sift(scope, 'identifiers') : null,
@@ -257,7 +279,7 @@
 
             self.postMessage(response);
         } else {
-            _log("Unknown message: " + JSON.stringify(e.data));
+            _log("Unknown message: " + JSON.stringify(request));
         }
     });
 }());
