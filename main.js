@@ -31,7 +31,8 @@ define(function (require, exports, module) {
         EditorManager           = brackets.getModule("editor/EditorManager"),
         EditorUtils             = brackets.getModule("editor/EditorUtils"),
         AppInit                 = brackets.getModule("utils/AppInit"),
-        Scope                   = require("scope").Scope;
+        Scope                   = require("scope").Scope,
+        KEYWORDS                = require("token").KEYWORDS;
 
     var MODE_NAME = "javascript",
         EVENT_TAG = "brackets-js-hints",
@@ -280,6 +281,7 @@ define(function (require, exports, module) {
                     properties = [];
                 }
                 identifiers = identifiers.concat(allGlobals);
+                identifiers = identifiers.concat(KEYWORDS);
 
                 if ($deferredHintObj !== null &&
                         $deferredHintObj.state() === "pending") {
@@ -462,9 +464,10 @@ define(function (require, exports, module) {
          * Receive an outer scope object from the parser worker
          */
         function handleOuterScope(response) {
-            outerWorkerActive = false;
+            var currentFile = sessionEditor.document.file.fullPath;
 
-            if (response.success) {
+            outerWorkerActive = false;
+            if (currentFile === response.path && response.success) {
                 outerScope = new Scope(response.scope);
                 // the outer scope should cover the entire file
                 outerScope.range.start = 0;
@@ -525,7 +528,7 @@ define(function (require, exports, module) {
 
         // uninstall/install change listner as the active editor changes
         $(EditorManager)
-            .on("activeEditorChange.brackets-js-hints",
+            .on("activeEditorChange." + EVENT_TAG,
                 function (event, current, previous) {
                     uninstallEditorListeners(previous);
                     installEditorListeners(current);

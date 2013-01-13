@@ -29,120 +29,11 @@
 
     var MAX_RETRIES = 100;
 
-    importScripts('esprima/esprima.js', 'scope.js');
+    importScripts('esprima/esprima.js', 'scope.js', 'token.js');
 
     function _log(msg) {
         self.postMessage({log: msg });
     }
-
-    function makeToken(value, positions) {
-        if (positions === undefined) {
-            positions = [];
-        }
-
-        return {
-            value: value,
-            positions: positions
-        };
-    }
-
-    var JSL_GLOBALS = [
-        "clearInterval", "clearTimeout", "document", "event", "frames",
-        "history", "Image", "location", "name", "navigator", "Option",
-        "parent", "screen", "setInterval", "setTimeout", "window",
-        "XMLHttpRequest", "alert", "confirm", "console", "Debug", "opera",
-        "prompt", "WSH", "Buffer", "exports", "global", "module", "process",
-        "querystring", "require", "__filename", "__dirname", "defineClass",
-        "deserialize", "gc", "help", "load", "loadClass", "print", "quit",
-        "readFile", "readUrl", "runCommand", "seal", "serialize", "spawn",
-        "sync", "toint32", "version", "ActiveXObject", "CScript", "Enumerator",
-        "System", "VBArray", "WScript"
-    ].reduce(function (prev, curr) {
-        prev[curr] = makeToken(curr);
-        return prev;
-    }, {});
-
-    var JSL_GLOBALS_BROWSER = [
-            JSL_GLOBALS.clearInteval,
-            JSL_GLOBALS.clearTimeout,
-            JSL_GLOBALS.document,
-            JSL_GLOBALS.event,
-            JSL_GLOBALS.frames,
-            JSL_GLOBALS.history,
-            JSL_GLOBALS.Image,
-            JSL_GLOBALS.location,
-            JSL_GLOBALS.name,
-            JSL_GLOBALS.navigator,
-            JSL_GLOBALS.Option,
-            JSL_GLOBALS.parent,
-            JSL_GLOBALS.screen,
-            JSL_GLOBALS.setInterval,
-            JSL_GLOBALS.setTimeout,
-            JSL_GLOBALS.window,
-            JSL_GLOBALS.XMLHttpRequest
-        ],
-        JSL_GLOBALS_DEVEL = [
-            JSL_GLOBALS.alert,
-            JSL_GLOBALS.confirm,
-            JSL_GLOBALS.console,
-            JSL_GLOBALS.Debug,
-            JSL_GLOBALS.opera,
-            JSL_GLOBALS.prompt,
-            JSL_GLOBALS.WSH
-        ],
-        JSL_GLOBALS_NODE = [
-            JSL_GLOBALS.Buffer,
-            JSL_GLOBALS.clearInterval,
-            JSL_GLOBALS.clearTimeout,
-            JSL_GLOBALS.console,
-            JSL_GLOBALS.exports,
-            JSL_GLOBALS.global,
-            JSL_GLOBALS.module,
-            JSL_GLOBALS.process,
-            JSL_GLOBALS.querystring,
-            JSL_GLOBALS.require,
-            JSL_GLOBALS.setInterval,
-            JSL_GLOBALS.setTimeout,
-            JSL_GLOBALS.__filename,
-            JSL_GLOBALS.__dirname
-        ],
-        JSL_GLOBALS_RHINO = [
-            JSL_GLOBALS.defineClass,
-            JSL_GLOBALS.deserialize,
-            JSL_GLOBALS.gc,
-            JSL_GLOBALS.help,
-            JSL_GLOBALS.load,
-            JSL_GLOBALS.loadClass,
-            JSL_GLOBALS.print,
-            JSL_GLOBALS.quit,
-            JSL_GLOBALS.readFile,
-            JSL_GLOBALS.readUrl,
-            JSL_GLOBALS.runCommand,
-            JSL_GLOBALS.seal,
-            JSL_GLOBALS.serialize,
-            JSL_GLOBALS.spawn,
-            JSL_GLOBALS.sync,
-            JSL_GLOBALS.toint32,
-            JSL_GLOBALS.version
-        ],
-        JSL_GLOBALS_WINDOWS = [
-            JSL_GLOBALS.ActiveXObject,
-            JSL_GLOBALS.CScript,
-            JSL_GLOBALS.Debug,
-            JSL_GLOBALS.Enumerator,
-            JSL_GLOBALS.System,
-            JSL_GLOBALS.VBArray,
-            JSL_GLOBALS.WScript,
-            JSL_GLOBALS.WSH
-        ];
-    
-    var JSL_GLOBAL_DEFS = {
-        browser : JSL_GLOBALS_BROWSER,
-        devel   : JSL_GLOBALS_DEVEL,
-        node    : JSL_GLOBALS_NODE,
-        rhino   : JSL_GLOBALS_RHINO,
-        windows : JSL_GLOBALS_WINDOWS
-    };
 
     /**
      * Walk the scope to find all the objects of a given type, along with a
@@ -165,7 +56,7 @@
         
         for (key in positions) {
             if (Object.prototype.hasOwnProperty.call(positions, key)) {
-                results.push(makeToken(key, positions[key]));
+                results.push(self.makeToken(key, positions[key]));
             }
         }
         return results;
@@ -188,7 +79,7 @@
                                 if (index >= 0) {
                                     g = g.substring(0, index);
                                 }
-                                globals.push(makeToken(g.trim()));
+                                globals.push(self.makeToken(g.trim()));
                             });
                         } else if (c.value.indexOf("jslint") === 0) {
                             c.value.substring(7).split(",").forEach(function (e) {
@@ -196,8 +87,8 @@
                                     prop = (index >= 0) ? e.substring(0, index).trim() : "",
                                     val = (index >= 0) ? e.substring(index + 1, e.length).trim() : "";
 
-                                if (val === "true" && JSL_GLOBAL_DEFS.hasOwnProperty(prop)) {
-                                    globals = globals.concat(JSL_GLOBAL_DEFS[prop]);
+                                if (val === "true" && self.JSL_GLOBAL_DEFS.hasOwnProperty(prop)) {
+                                    globals = globals.concat(self.JSL_GLOBAL_DEFS[prop]);
                                 }
                             });
                         }
