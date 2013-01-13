@@ -45,12 +45,12 @@ define(function (require, exports, module) {
         innerScope          = null,  // the inner-most scope returned by the query worker
         identifiers         = null,  // identifiers in the local scope
         properties          = null,  // properties sorted by position
-        allGlobals          = null,  // all global variables
-        allIdentifiers      = null,  // all identifiers from the outer scope
-        allProperties       = null,  // all properties from the outer scope
-        outerScope          = null,  // the outer-most scope returned by the parser worker
-        outerScopeDirty     = true,  // has the file changed since the last outer scope request? 
-        outerWorkerActive   = false, // is the outer worker active? 
+        allGlobals          = {},    // path -> list of all global variables
+        allIdentifiers      = {},    // path -> list of all identifiers
+        allProperties       = {},    // path -> list of all properties
+        outerScope          = {},    // path -> outer-most scope
+        outerScopeDirty     = {},    // path -> has the path changed since the last outer scope request? 
+        outerWorkerActive   = {},    // path -> is the outer worker active for the path? 
         outerScopeWorker    = (function () {
             var path = module.uri.substring(0, module.uri.lastIndexOf("/") + 1);
             return new Worker(path + "parser-worker.js");
@@ -168,19 +168,32 @@ define(function (require, exports, module) {
     /**
      * Request a new outer scope object from the parser worker, if necessary
      */
-    function _refreshOuterScope() {
+    function _refreshOuterScope(path) {
+
+        if (!outerScope.hasOwnProperty(path)) {
+            outerScope[path] = null;
+        }
+
+        if (!outerScopeDirty.hasOwnProperty(path)) {
+            outerScopeDirty[path] = true;
+        }
+        
+        if (!outerWorkerActive.hasOwnProperty(path)) {
+            outerWorkerActive[path] = false;
+        }
+       
         // if there is not yet an outer scope or if the file has changed then
         // we might need to update the outer scope
-        if (outerScope === null || outerScopeDirty) {
-            if (!outerWorkerActive) {
+        if (outerScope[path] === null || outerScopeDirty[path]) {
+            if (!outerWorkerActive[path]) {
                 // and maybe if some time has passed without parsing... 
-                outerWorkerActive = true; // the outer scope worker is active
-                outerScopeDirty = false; // the file is clean since the last outer scope request
+                outerWorkerActive[path] = true; // the outer scope worker is active
+                outerScopeDirty[path] = false; // the file is clean since the last outer scope request
                 outerScopeWorker.postMessage({
                     type        : SCOPE_MSG_TYPE,
-                    path        : sessionEditor.document.file.fullPath,
+                    path        : path,
                     text        : sessionEditor.document.getText(),
-                    force       : !outerScope
+                    force       : !outerScope[path]
                 });
             }
         }
@@ -189,7 +202,7 @@ define(function (require, exports, module) {
     /**
      * Recompute the inner scope for a given offset, if necessary
      */
-    function _refreshInnerScope(offset) {
+    function _refreshInnerScope(path, offset) {
 
         /*
          * Filter a list of tokens using a given scope object
@@ -212,7 +225,7 @@ define(function (require, exports, module) {
          */
         function comparePositions(pos) {
             function mindist(pos, t) {
-                var dist = Math.abs(t.positions[0] - pos),
+                var dist = t.positions.length ? Math.abs(t.positions[0] - pos) : Infinity,
                     i,
                     tmp;
 
@@ -260,11 +273,11 @@ define(function (require, exports, module) {
         if (innerScope === null || innerScopeDirty ||
                 !innerScope.containsPositionImmediate(offset)) {
 
-            if (outerScope === null) {
+            if (outerScope[path] === null) {
                 innerScopePending = offset;
-                _refreshOuterScope();
+                _refreshOuterScope(path);
             } else {
-                if (outerWorkerActive) {
+                if (outerWorkerActive[path]) {
                     innerScopePending = offset;
                 } else {
                     innerScopePending = null;
@@ -272,20 +285,20 @@ define(function (require, exports, module) {
                 console.log("Inner scope");
                 innerScopeDirty = false;
 
-                innerScope = outerScope.findChild(offset);
+                innerScope = outerScope[path].findChild(offset);
                 if (innerScope) {
                     // FIXME: This could be more efficient if instead of filtering
                     // the entire list of identifiers we just used the identifiers
                     // in the scope of innerScope, but that list doesn't have the
                     // accumulated position information.
-                    identifiers = filterByScope(allIdentifiers, innerScope);
+                    identifiers = filterByScope(allIdentifiers[path], innerScope);
                     identifiers.sort(compareScopes(innerScope, offset));
-                    properties = allProperties.slice(0).sort(comparePositions(offset));
+                    properties = allProperties[path].slice(0).sort(comparePositions(offset));
                 } else {
                     identifiers = [];
                     properties = [];
                 }
-                identifiers = identifiers.concat(allGlobals);
+                identifiers = identifiers.concat(allGlobals[path]);
                 identifiers = identifiers.concat(KEYWORDS);
 
                 if ($deferredHintObj !== null &&
@@ -303,19 +316,19 @@ define(function (require, exports, module) {
      * editor
      */
     function _refreshEditor(editor) {
-        var newFilename = editor.document.file.fullPath;
+        var path = editor.document.file.fullPath;
 
         if (!sessionEditor ||
-                sessionEditor.document.file.fullPath !== newFilename) {
-            allGlobals = null;
-            allProperties = null;
-            allIdentifiers = null;
+                sessionEditor.document.file.fullPath !== path) {
+            // allGlobals = null;
+            // allProperties = null;
+            // allIdentifiers = null;
             identifiers = null;
             properties = null;
             innerScope = null;
-            outerScope = null;
-            outerScopeDirty = true;
-            innerScopeDirty = true;
+            // outerScope[path] = null;
+            outerScopeDirty[path] = true;
+            // innerScopeDirty[path] = true;
         }
         sessionEditor = editor;
 
@@ -324,7 +337,7 @@ define(function (require, exports, module) {
         }
         $deferredHintObj = null;
 
-        _refreshOuterScope();
+        _refreshOuterScope(path);
     }
 
     /**
@@ -356,6 +369,7 @@ define(function (require, exports, module) {
     }
 
     JSHints.prototype.hasHints = function (editor, key) {
+
         /*
          * Compute the cursor's offset from the beginning of the document
          */
@@ -374,12 +388,14 @@ define(function (require, exports, module) {
         if ((key === null) || _maybeIdentifier(key)) {
             var cursor      = editor.getCursorPos(),
                 token       = editor._codeMirror.getTokenAt(cursor),
+                path,
                 offset;
 
             // don't autocomplete within strings or comments, etc.
-            if (_hintableTokenClass(token)) {
+            if (token && _hintableTokenClass(token)) {
+                path = sessionEditor.document.file.fullPath;
                 offset = _cursorOffset(sessionEditor.document, cursor);
-                _refreshInnerScope(offset);
+                _refreshInnerScope(path, offset);
                 return true;
             }
         }
@@ -396,7 +412,8 @@ define(function (require, exports, module) {
                 token  = sessionEditor._codeMirror.getTokenAt(cursor);
 
             if (token && _hintableTokenClass(token)) {
-                if (outerScope) {
+                var path = sessionEditor.document.file.fullPath;
+                if (outerScope[path]) {
                     return _getHintObj();
                 } else {
                     if (!$deferredHintObj || $deferredHintObj.isRejected()) {
@@ -436,6 +453,7 @@ define(function (require, exports, module) {
 
         var completion = hint.data('hint'),
             cm = sessionEditor._codeMirror,
+            path = sessionEditor.document.file.fullPath,
             cursor = sessionEditor.getCursorPos(),
             token = cm.getTokenAt(cursor),
             nextToken = getNextToken(cm, cursor),
@@ -453,8 +471,7 @@ define(function (require, exports, module) {
         }
 
         cm.replaceRange(completion, start, end);
-        outerScopeDirty = true;
-
+        outerScopeDirty[path] = true;
         return false;
     };
 
@@ -465,26 +482,26 @@ define(function (require, exports, module) {
          * Receive an outer scope object from the parser worker
          */
         function handleOuterScope(response) {
-            var currentFile = sessionEditor.document.file.fullPath;
+            var path = sessionEditor.document.file.fullPath;
 
-            outerWorkerActive = false;
-            if (currentFile === response.path && response.success) {
-                outerScope = new Scope(response.scope);
+            outerWorkerActive[path] = false;
+            if (response.success) {
+                outerScope[path] = new Scope(response.scope);
                 // the outer scope should cover the entire file
-                outerScope.range.start = 0;
-                outerScope.range.end = sessionEditor.document.getText().length;
+                outerScope[path].range.start = 0;
+                outerScope[path].range.end = sessionEditor.document.getText().length;
 
-                allGlobals = response.globals;
-                allIdentifiers = response.identifiers;
-                allProperties = response.properties;
+                allGlobals[path] = response.globals;
+                allIdentifiers[path] = response.identifiers;
+                allProperties[path] = response.properties;
                 innerScopeDirty = true;
 
-                if (outerScopeDirty) {
-                    _refreshOuterScope();
+                if (outerScopeDirty[path]) {
+                    _refreshOuterScope(path);
                 }
 
                 if (innerScopePending !== null) {
-                    _refreshInnerScope(innerScopePending);
+                    _refreshInnerScope(path, innerScopePending);
                 }
             }
         }
@@ -496,12 +513,14 @@ define(function (require, exports, module) {
             if (!editor) {
                 return;
             }
+            
+            var path = editor.document.file.fullPath;
 
             if (editor.getModeForSelection() === "javascript") {
                 $(editor)
                     .on("change." + EVENT_TAG, function () {
-                        outerScopeDirty = true;
-                        _refreshOuterScope();
+                        outerScopeDirty[path] = true;
+                        _refreshOuterScope(path);
                     });
 
                 _refreshEditor(editor);
@@ -527,7 +546,7 @@ define(function (require, exports, module) {
             }
         });
 
-        // uninstall/install change listner as the active editor changes
+        // uninstall/install change listener as the active editor changes
         $(EditorManager)
             .on("activeEditorChange." + EVENT_TAG,
                 function (event, current, previous) {
