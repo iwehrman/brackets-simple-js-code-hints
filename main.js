@@ -195,6 +195,8 @@ define(function (require, exports, module) {
                     text        : sessionEditor.document.getText(),
                     force       : !outerScope[path]
                 });
+            } else {
+                console.log("Already parsing: " + path);
             }
         }
     }
@@ -266,6 +268,18 @@ define(function (require, exports, module) {
                 }
             };
         }
+        
+        function compareNames(a, b) {
+            return a.value < b.value;
+        }
+        
+        var uniqueprops = {}, otherprops = [], otherpath, propname;
+        
+        function addin(token) {
+            if (!Object.prototype.hasOwnProperty.call(uniqueprops, token.value)) {
+                uniqueprops[token.value] = token;
+            }
+        }
 
         // if there is not yet an inner scope, or if the outer scope has 
         // changed, or if the inner scope is invalid w.r.t. the current cursor
@@ -294,6 +308,22 @@ define(function (require, exports, module) {
                     identifiers = filterByScope(allIdentifiers[path], innerScope);
                     identifiers.sort(compareScopes(innerScope, offset));
                     properties = allProperties[path].slice(0).sort(comparePositions(offset));
+                    
+                    for (otherpath in allProperties) {
+                        if (allProperties.hasOwnProperty(otherpath)) {
+                            if (otherpath !== path) {
+                                allProperties[otherpath].forEach(addin);
+                            }
+                        }
+                    }
+                    
+                    for (propname in uniqueprops) {
+                        if (Object.prototype.hasOwnProperty.call(uniqueprops, propname)) {
+                            otherprops.push(uniqueprops[propname]);
+                        }
+                    }
+                    
+                    properties = properties.concat(otherprops.sort(compareNames));
                 } else {
                     identifiers = [];
                     properties = [];
@@ -482,7 +512,7 @@ define(function (require, exports, module) {
          * Receive an outer scope object from the parser worker
          */
         function handleOuterScope(response) {
-            var path = sessionEditor.document.file.fullPath;
+            var path = response.path;
 
             outerWorkerActive[path] = false;
             if (response.success) {
