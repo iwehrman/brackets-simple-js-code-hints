@@ -264,7 +264,12 @@ define(function (require, exports, module) {
                 innerScopePending = offset;
                 _refreshOuterScope();
             } else {
-                innerScopePending = null;
+                if (outerWorkerActive) {
+                    innerScopePending = offset;
+                } else {
+                    innerScopePending = null;
+                }
+                console.log("Inner scope");
                 innerScopeDirty = false;
 
                 innerScope = outerScope.findChild(offset);
@@ -351,14 +356,31 @@ define(function (require, exports, module) {
     }
 
     JSHints.prototype.hasHints = function (editor, key) {
-        var cursor      = editor.getCursorPos(),
-            token       = editor._codeMirror.getTokenAt(cursor),
-            newFilename = editor.document.file.fullPath;
+        /*
+         * Compute the cursor's offset from the beginning of the document
+         */
+        function _cursorOffset(document, cursor) {
+            var offset = 0,
+                i;
+
+            for (i = 0; i < cursor.line; i++) {
+                // +1 for the removed line break
+                offset += document.getLine(i).length + 1;
+            }
+            offset += cursor.ch;
+            return offset;
+        }
 
         if ((key === null) || _maybeIdentifier(key)) {
+            var cursor      = editor.getCursorPos(),
+                token       = editor._codeMirror.getTokenAt(cursor),
+                offset;
+
             // don't autocomplete within strings or comments, etc.
             if (_hintableTokenClass(token)) {
+                offset = _cursorOffset(sessionEditor.document, cursor);
                 _refreshEditor(editor);
+                _refreshInnerScope(offset);
                 return true;
             }
         }
@@ -370,30 +392,11 @@ define(function (require, exports, module) {
       * context
       */
     JSHints.prototype.getHints = function (key) {
-        var cursor = sessionEditor.getCursorPos(),
-            hints,
-            token;
-        
-        function _cursorOffset(document, cursor) {
-            var offset = 0,
-                i;
-            
-            for (i = 0; i < cursor.line; i++) {
-                // +1 for the removed line break
-                offset += document.getLine(i).length + 1;
-            }
-            offset += cursor.ch;
-            return offset;
-        }
-        
         if ((key === null) || _maybeIdentifier(key)) {
-            token = sessionEditor._codeMirror.getTokenAt(cursor);
+            var cursor = sessionEditor.getCursorPos(),
+                token  = sessionEditor._codeMirror.getTokenAt(cursor);
 
             if (token && _hintableTokenClass(token)) {
-
-                var offset = _cursorOffset(sessionEditor.document, cursor);
-                _refreshInnerScope(offset);
-                
                 if (outerScope) {
                     return _getHintObj();
                 } else {
