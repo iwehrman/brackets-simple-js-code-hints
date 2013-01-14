@@ -379,7 +379,6 @@ define(function (require, exports, module) {
             // don't autocomplete within strings or comments, etc.
             if (_hintableTokenClass(token)) {
                 offset = _cursorOffset(sessionEditor.document, cursor);
-                _refreshEditor(editor);
                 _refreshInnerScope(offset);
                 return true;
             }
@@ -455,7 +454,6 @@ define(function (require, exports, module) {
 
         cm.replaceRange(completion, start, end);
         outerScopeDirty = true;
-        _refreshOuterScope();
 
         return false;
     };
