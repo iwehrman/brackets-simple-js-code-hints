@@ -64,14 +64,14 @@ define(function (require, exports, module) {
         /*
          * Get the token before the one at the given cursor
          */
-        function getPreviousToken(cm, cursor) {
+        function getPreviousToken(cm, cursor, token) {
             var doc = sessionEditor.document;
 
-            if (cursor.ch > 0) {
-                return cm.getTokenAt({ch: cursor.ch - 1,
+            if (token.start >= 0) {
+                return cm.getTokenAt({ch: token.start,
                                       line: cursor.line});
-            } else if (cursor.ch === 0 && cursor.line > 0) {
-                return cm.getTokenAt({ch: doc.getLine(cursor.line - 1).length,
+            } else if (cursor.line > 0) {
+                return cm.getTokenAt({ch: doc.getLine(cursor.line - 1).length - 1,
                                       line: cursor.line - 1});
             }
             
@@ -143,7 +143,7 @@ define(function (require, exports, module) {
         var cursor = sessionEditor.getCursorPos(),
             cm = sessionEditor._codeMirror,
             token = cm.getTokenAt(cursor),
-            prevToken = getPreviousToken(cm, cursor),
+            prevToken = getPreviousToken(cm, cursor, token),
             query = getQuery(cursor, token),
             hints;
 
