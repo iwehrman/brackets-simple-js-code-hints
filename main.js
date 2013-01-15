@@ -269,7 +269,7 @@ define(function (require, exports, module) {
                 } else {
                     innerScopePending = null;
                 }
-
+                console.log("Inner scope");
                 innerScopeDirty = false;
 
                 innerScope = outerScope.findChild(offset);
@@ -450,8 +450,6 @@ define(function (require, exports, module) {
                 start.ch = nextToken.start;
                 end.ch = nextToken.end;
             }
-        } else if (token.string !== completion) {
-            end.ch = cursor.ch;
         }
 
         cm.replaceRange(completion, start, end);
