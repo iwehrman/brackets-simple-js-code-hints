@@ -31,6 +31,7 @@ define(function (require, exports, module) {
         DocumentManager         = brackets.getModule("document/DocumentManager"),
         EditorManager           = brackets.getModule("editor/EditorManager"),
         EditorUtils             = brackets.getModule("editor/EditorUtils"),
+        NativeFileSystem        = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
         AppInit                 = brackets.getModule("utils/AppInit"),
         Scope                   = require("scope").Scope,
         KEYWORDS                = require("token").KEYWORDS;
@@ -189,6 +190,7 @@ define(function (require, exports, module) {
         // we might need to update the outer scope
         if (outerScope[path] === null || outerScopeDirty[path]) {
             if (!outerWorkerActive[path]) {
+                console.log("Requesting parse: " + path);
                 // and maybe if some time has passed without parsing... 
                 outerWorkerActive[path] = true; // the outer scope worker is active
                 outerScopeDirty[path] = false; // the file is clean since the last outer scope request
@@ -403,8 +405,22 @@ define(function (require, exports, module) {
     }
 
     function _refreshDocument(doc) {
-        var path = doc.file.fullPath;
-        _refreshOuterScope(path);
+        var path    = doc.file.fullPath,
+            parent  = path.substring(0, path.lastIndexOf("/")),
+            dir     = new NativeFileSystem.DirectoryEntry(parent),
+            reader  = dir.createReader();
+        
+        reader.readEntries(function (entries) {
+            entries.forEach(function (entry) {
+                if (entry.isFile &&
+                        entry.fullPath.lastIndexOf(".js") === entry.fullPath.length - 3) {
+                    _refreshOuterScope(entry.fullPath);
+                }
+            });
+        }, function (err) {
+            console.log("Unable to refresh directory: " + err);
+            _refreshOuterScope(path);
+        });
     }
 
     /**
