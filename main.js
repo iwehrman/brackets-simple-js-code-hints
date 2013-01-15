@@ -28,6 +28,7 @@ define(function (require, exports, module) {
     "use strict";
 
     var CodeHintManager         = brackets.getModule("editor/CodeHintManager"),
+        DocumentManager         = brackets.getModule("document/DocumentManager"),
         EditorManager           = brackets.getModule("editor/EditorManager"),
         EditorUtils             = brackets.getModule("editor/EditorUtils"),
         AppInit                 = brackets.getModule("utils/AppInit"),
@@ -96,8 +97,7 @@ define(function (require, exports, module) {
          * Filter a list of tokens using a given query string
          */
         function filterWithQuery(tokens, query) {
-            var i,
-                hints = tokens.filter(function (token) {
+            var hints = tokens.filter(function (token) {
                     return (token.value.indexOf(query) === 0);
                 });
 
@@ -157,6 +157,9 @@ define(function (require, exports, module) {
         } else {
             hints = filterWithQuery(identifiers, query);
         }
+
+        // Truncate large hint lists for performance reasons
+        hints = hints.slice(0, 100);
         
         return {
             hints: formatHints(hints, query),
@@ -225,7 +228,7 @@ define(function (require, exports, module) {
          * Comparator for sorting tokens according to minimum distance from
          * a given position
          */
-        function comparePositions(pos) {
+        function compareByPosition(pos) {
             function mindist(pos, t) {
                 var dist = t.positions.length ? Math.abs(t.positions[0] - pos) : Infinity,
                     i,
@@ -249,14 +252,14 @@ define(function (require, exports, module) {
          * Comparator for sorting tokens lexicographically according to scope
          * and then minimum distance from a given position
          */
-        function compareScopes(scope, pos) {
+        function compareByScope(scope) {
             return function (a, b) {
                 var adepth = scope.contains(a.value);
                 var bdepth = scope.contains(b.value);
 
                 if (adepth === bdepth) {
                     // sort symbols at the same scope depth
-                    return comparePositions(pos)(a, b);
+                    return 0;
                 } else if (adepth !== null && bdepth !== null) {
                     return adepth - bdepth;
                 } else {
@@ -269,16 +272,91 @@ define(function (require, exports, module) {
             };
         }
         
-        function compareNames(a, b) {
+        /*
+         * Comparator for sorting tokens by name
+         */
+        function compareByName(a, b) {
             return a.value < b.value;
         }
         
-        var uniqueprops = {}, otherprops = [], otherpath, propname;
+        /*
+         * Comparator for sorting tokens by path, such that
+         * a <= b if a.path === path
+         */
+        function compareByPath(path) {
+            return function (a, b) {
+                if (a.path === path) {
+                    if (b.path === path) {
+                        return 0;
+                    } else {
+                        return -1;
+                    }
+                } else {
+                    if (b.path === path) {
+                        return 1;
+                    } else {
+                        return 0;
+                    }
+                }
+            };
+        }
         
-        function addin(token) {
-            if (!Object.prototype.hasOwnProperty.call(uniqueprops, token.value)) {
-                uniqueprops[token.value] = token;
+        /*
+         * Forms the lexicographical composition of comparators
+         */
+        function lexicographic(compare1, compare2) {
+            return function (a, b) {
+                var result = compare1(a, b);
+                if (result === 0) {
+                    return compare2(a, b);
+                } else {
+                    return result;
+                }
+            };
+        }
+        
+        /*
+         * A comparator for identifiers
+         */
+        function compareIdentifiers(scope, pos) {
+            return lexicographic(compareByScope(scope), compareByPosition(pos));
+        }
+        
+        function compareProperties(path) {
+            return lexicographic(compareByPath(path),
+                                 lexicographic(compareByPosition(offset),
+                                               compareByName));
+        }
+        
+        function mergeProperties(properties, path, offset) {
+            var uniqueprops = {},
+                otherprops = [],
+                otherpath,
+                propname;
+            
+            function addin(token) {
+                if (!Object.prototype.hasOwnProperty.call(uniqueprops, token.value)) {
+                    uniqueprops[token.value] = token;
+                }
             }
+            
+            properties.forEach(addin);
+            
+            for (otherpath in allProperties) {
+                if (allProperties.hasOwnProperty(otherpath)) {
+                    if (otherpath !== path) {
+                        allProperties[otherpath].forEach(addin);
+                    }
+                }
+            }
+            
+            for (propname in uniqueprops) {
+                if (Object.prototype.hasOwnProperty.call(uniqueprops, propname)) {
+                    otherprops.push(uniqueprops[propname]);
+                }
+            }
+            
+            return otherprops.sort(compareProperties(path));
         }
 
         // if there is not yet an inner scope, or if the outer scope has 
@@ -296,9 +374,8 @@ define(function (require, exports, module) {
                 } else {
                     innerScopePending = null;
                 }
-                console.log("Inner scope");
                 innerScopeDirty = false;
-
+                
                 innerScope = outerScope[path].findChild(offset);
                 if (innerScope) {
                     // FIXME: This could be more efficient if instead of filtering
@@ -306,24 +383,8 @@ define(function (require, exports, module) {
                     // in the scope of innerScope, but that list doesn't have the
                     // accumulated position information.
                     identifiers = filterByScope(allIdentifiers[path], innerScope);
-                    identifiers.sort(compareScopes(innerScope, offset));
-                    properties = allProperties[path].slice(0).sort(comparePositions(offset));
-                    
-                    for (otherpath in allProperties) {
-                        if (allProperties.hasOwnProperty(otherpath)) {
-                            if (otherpath !== path) {
-                                allProperties[otherpath].forEach(addin);
-                            }
-                        }
-                    }
-                    
-                    for (propname in uniqueprops) {
-                        if (Object.prototype.hasOwnProperty.call(uniqueprops, propname)) {
-                            otherprops.push(uniqueprops[propname]);
-                        }
-                    }
-                    
-                    properties = properties.concat(otherprops.sort(compareNames));
+                    identifiers.sort(compareIdentifiers(innerScope, offset));
+                    properties = mergeProperties(allProperties[path].slice(0), path, offset);
                 } else {
                     identifiers = [];
                     properties = [];
@@ -339,6 +400,11 @@ define(function (require, exports, module) {
                 $deferredHintObj = null;
             }
         }
+    }
+
+    function _refreshDocument(doc) {
+        var path = doc.file.fullPath;
+        _refreshOuterScope(path);
     }
 
     /**
@@ -367,7 +433,7 @@ define(function (require, exports, module) {
         }
         $deferredHintObj = null;
 
-        _refreshOuterScope(path);
+        _refreshDocument(editor.document);
     }
 
     /**
@@ -523,7 +589,10 @@ define(function (require, exports, module) {
 
                 allGlobals[path] = response.globals;
                 allIdentifiers[path] = response.identifiers;
-                allProperties[path] = response.properties;
+                allProperties[path] = response.properties.map(function (p) {
+                    p.path = path;
+                    return p;
+                });
                 innerScopeDirty = true;
 
                 if (outerScopeDirty[path]) {
@@ -583,7 +652,7 @@ define(function (require, exports, module) {
                     uninstallEditorListeners(previous);
                     installEditorListeners(current);
                 });
-
+        
         installEditorListeners(EditorManager.getActiveEditor());
 
         var jsHints = new JSHints();
