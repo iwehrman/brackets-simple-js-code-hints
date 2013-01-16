@@ -21,7 +21,7 @@
  * 
  */
 
-/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50, forin: true */
+/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
 /*global define, brackets, CodeMirror, $, Worker */
 
 define(function (require, exports, module) {
@@ -376,7 +376,7 @@ define(function (require, exports, module) {
             
             otherprops = allProperties[dir];
             for (otherfile in otherprops) {
-                if (otherprops.hasOwnProperty(file)) {
+                if (otherprops.hasOwnProperty(otherfile)) {
                     if (otherfile !== file) {
                         otherprops[otherfile].forEach(addin);
                     }
