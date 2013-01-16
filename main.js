@@ -411,6 +411,16 @@ define(function (require, exports, module) {
                 innerScopeDirty = false;
                 
                 innerScope = outerScope[dir][file].findChild(offset);
+                if (!innerScope && outerScope[dir][file].range.end < offset) {
+                    // we may have failed to find a child scope because a 
+                    // character was added to the end of the file, outside of
+                    // the (now out-of-date and currently-being-updated) 
+                    // outer scope. Hence, if offset is greater than the range
+                    // of the outerScope, we manually set innerScope to the
+                    // outerScope
+                    innerScope = outerScope[dir][file];
+                }
+                
                 if (innerScope) {
                     // FIXME: This could be more efficient if instead of filtering
                     // the entire list of identifiers we just used the identifiers
@@ -665,7 +675,7 @@ define(function (require, exports, module) {
                 if (response.success) {
                     outerScope[dir][file] = new Scope(response.scope);
                     
-                    // the outer scope should cover the entire file
+                    // The outer scope should cover the entire file
                     outerScope[dir][file].range.start = 0;
                     outerScope[dir][file].range.end = response.length;
                     
