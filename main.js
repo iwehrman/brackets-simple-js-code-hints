@@ -31,6 +31,7 @@ define(function (require, exports, module) {
         DocumentManager         = brackets.getModule("document/DocumentManager"),
         EditorManager           = brackets.getModule("editor/EditorManager"),
         EditorUtils             = brackets.getModule("editor/EditorUtils"),
+        FileUtils               = brackets.getModule("file/FileUtils"),
         NativeFileSystem        = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
         AppInit                 = brackets.getModule("utils/AppInit"),
         Scope                   = require("scope").Scope,
@@ -194,11 +195,13 @@ define(function (require, exports, module) {
                 // and maybe if some time has passed without parsing... 
                 outerWorkerActive[path] = true; // the outer scope worker is active
                 outerScopeDirty[path] = false; // the file is clean since the last outer scope request
-                outerScopeWorker.postMessage({
-                    type        : SCOPE_MSG_TYPE,
-                    path        : path,
-                    text        : sessionEditor.document.getText(),
-                    force       : !outerScope[path]
+                FileUtils.readAsText(new NativeFileSystem.FileEntry(path)).done(function (text) {
+                    outerScopeWorker.postMessage({
+                        type        : SCOPE_MSG_TYPE,
+                        path        : path,
+                        text        : text,
+                        force       : !outerScope[path]
+                    });
                 });
             } else {
                 console.log("Already parsing: " + path);
@@ -404,9 +407,8 @@ define(function (require, exports, module) {
         }
     }
 
-    function _refreshDocument(doc) {
-        var path    = doc.file.fullPath,
-            parent  = path.substring(0, path.lastIndexOf("/")),
+    function _refreshFile(path) {
+        var parent  = path.substring(0, path.lastIndexOf("/")),
             dir     = new NativeFileSystem.DirectoryEntry(parent),
             reader  = dir.createReader();
         
@@ -449,7 +451,7 @@ define(function (require, exports, module) {
         }
         $deferredHintObj = null;
 
-        _refreshDocument(editor.document);
+        _refreshFile(path);
     }
 
     /**
@@ -598,26 +600,30 @@ define(function (require, exports, module) {
 
             outerWorkerActive[path] = false;
             if (response.success) {
-                outerScope[path] = new Scope(response.scope);
-                // the outer scope should cover the entire file
-                outerScope[path].range.start = 0;
-                outerScope[path].range.end = sessionEditor.document.getText().length;
-
-                allGlobals[path] = response.globals;
-                allIdentifiers[path] = response.identifiers;
-                allProperties[path] = response.properties.map(function (p) {
-                    p.path = path;
-                    return p;
+                var fileEntry = new NativeFileSystem.FileEntry(path);
+                
+                FileUtils.readAsText(fileEntry).done(function (text) { // FIXME maybe just return the text length? 
+                    outerScope[path] = new Scope(response.scope);
+                    // the outer scope should cover the entire file
+                    outerScope[path].range.start = 0;
+                    outerScope[path].range.end = text.length;
+    
+                    allGlobals[path] = response.globals;
+                    allIdentifiers[path] = response.identifiers;
+                    allProperties[path] = response.properties.map(function (p) {
+                        p.path = path;
+                        return p;
+                    });
+                    innerScopeDirty = true;
+    
+                    if (outerScopeDirty[path]) {
+                        _refreshOuterScope(path);
+                    }
+    
+                    if (innerScopePending !== null) {
+                        _refreshInnerScope(path, innerScopePending);
+                    }
                 });
-                innerScopeDirty = true;
-
-                if (outerScopeDirty[path]) {
-                    _refreshOuterScope(path);
-                }
-
-                if (innerScopePending !== null) {
-                    _refreshInnerScope(path, innerScopePending);
-                }
             }
         }
 
