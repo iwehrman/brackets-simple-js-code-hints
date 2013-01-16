@@ -316,7 +316,7 @@ define(function (require, exports, module) {
     Scope.prototype.findChild = function (pos) {
         var i;
         
-        if (this.range.start <= pos && pos < this.range.end) {
+        if (this.range.start <= pos && pos <= this.range.end) {
             for (i = 0; i < this.children.length; i++) {
                 if (this.children[i].range.start <= pos &&
                         pos <= this.children[i].range.end) {
