@@ -157,6 +157,7 @@
                             setTimeout(function () {
                                 parse(path, lines.join("\n"), --retries);
                             }, 0);
+                            return;
                         }
                     }
                 }
