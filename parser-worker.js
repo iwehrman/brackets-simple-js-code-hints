@@ -103,14 +103,16 @@
         return globals;
     }
 
-    function respond(path, parseObj) {
+    function respond(dir, file, length, parseObj) {
         var scope = parseObj ? parseObj.scope : null,
             globals = parseObj ? parseObj.globals : null,
             identifiers = parseObj ? sift(scope, 'identifiers') : null,
             properties = parseObj ? sift(scope, 'properties') : null,
             response  = {
                 type        : SCOPE_MSG_TYPE,
-                path        : path,
+                dir         : dir,
+                file        : file,
+                length      : length,
                 scope       : scope,
                 globals     : globals,
                 identifiers : identifiers,
@@ -124,7 +126,7 @@
     /**
      * Use Esprima to parse a JavaScript text
      */
-    function parse(path, text, retries) {
+    function parse(dir, file, text, retries) {
         try {
             var ast = esprima.parse(text, {
                 range       : true,
@@ -136,7 +138,7 @@
                 _log("Parse errors: " + JSON.stringify(ast.errors));
             }
 
-            respond(path, {
+            respond(dir, file, text.length, {
                 scope : new self.Scope(ast),
                 globals : extractGlobals(ast.comments)
             });
@@ -155,14 +157,14 @@
                         if (removed && removed.length > 0) {
                             // _log("Removed: '" + removed[0] + "'");
                             setTimeout(function () {
-                                parse(path, lines.join("\n"), --retries);
+                                parse(dir, file, text.length, lines.join("\n"), --retries);
                             }, 0);
                             return;
                         }
                     }
                 }
             }
-            respond(path, null);
+            respond(dir, file, text.length, null);
         }
     }
     
@@ -171,10 +173,11 @@
             type = request.type;
 
         if (type === SCOPE_MSG_TYPE) {
-            var text    = request.text,
-                newpath = request.path,
+            var dir     = request.dir,
+                file    = request.file,
+                text    = request.text,
                 retries = request.force ? MAX_RETRIES : 0;
-            setTimeout(function () { parse(newpath, text, retries); }, 0);
+            setTimeout(function () { parse(dir, file, text, retries); }, 0);
         } else {
             _log("Unknown message: " + JSON.stringify(request));
         }
