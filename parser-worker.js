@@ -40,12 +40,13 @@
      * Walk the scope to find all the objects of a given type, along with a
      * list of their positions in the file.
      */
-    function sift(scope, walk) {
-        var positions,
+    function siftPositions(scope, walk) {
+        var occurrences,
             results = [],
-            key;
+            key,
+            token;
 
-        positions = walk.call(scope, function (acc, token) {
+        occurrences = walk.call(scope, function (acc, token) {
             if (Object.prototype.hasOwnProperty.call(acc, token.name)) {
                 acc[token.name].push(token.range[0]);
             } else {
@@ -53,15 +54,34 @@
             }
             return acc;
         }, {});
-        
-        for (key in positions) {
-            if (Object.prototype.hasOwnProperty.call(positions, key)) {
-                results.push(self.makeToken(key, positions[key]));
+
+        for (key in occurrences) {
+            if (Object.prototype.hasOwnProperty.call(occurrences, key)) {
+                token = self.makeToken(key, occurrences[key]);
+                results.push(token);
             }
         }
         return results;
     }
-    
+
+    function siftAssociations(scope) {
+        return scope.walkDownAssociations(function (acc, assoc) {
+            var obj     = assoc.object,
+                prop    = assoc.property;
+            if (Object.prototype.hasOwnProperty.call(acc, obj.name)) {
+                if (Object.prototype.hasOwnProperty.call(acc[obj.name], prop.name)) {
+                    acc[obj.name][prop.name]++;
+                } else {
+                    acc[obj.name][prop.name] = 1;
+                }
+            } else {
+                acc[obj.name] = {};
+                acc[obj.name][prop.name] = 1;
+            }
+            return acc;
+        }, {});
+    }
+
     /**
      * Look for a JSLint globals annotation in the comments
      */
@@ -105,18 +125,20 @@
     function respond(dir, file, length, parseObj) {
         var scope = parseObj ? parseObj.scope : null,
             globals = parseObj ? parseObj.globals : null,
-            identifiers = parseObj ? sift(scope, scope.walkDownIdentifiers) : null,
-            properties = parseObj ? sift(scope, scope.walkDownProperties) : null,
+            identifiers = parseObj ? siftPositions(scope, scope.walkDownIdentifiers) : null,
+            properties = parseObj ? siftPositions(scope, scope.walkDownProperties) : null,
+            associations = parseObj ? siftAssociations(scope, scope.walkDownAssociations) : null,
             response  = {
-                type        : SCOPE_MSG_TYPE,
-                dir         : dir,
-                file        : file,
-                length      : length,
-                scope       : scope,
-                globals     : globals,
-                identifiers : identifiers,
-                properties  : properties,
-                success     : !!parseObj
+                type            : SCOPE_MSG_TYPE,
+                dir             : dir,
+                file            : file,
+                length          : length,
+                scope           : scope,
+                globals         : globals,
+                identifiers     : identifiers,
+                properties      : properties,
+                associations    : associations,
+                success         : !!parseObj
             };
 
         self.postMessage(response);

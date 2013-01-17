@@ -22,7 +22,7 @@
  */
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
-/*global define, brackets, CodeMirror, $, Worker */
+/*global define, brackets, $, Worker */
 
 define(function (require, exports, module) {
     "use strict";
@@ -42,51 +42,61 @@ define(function (require, exports, module) {
         EVENT_TAG = "brackets-js-hints",
         SCOPE_MSG_TYPE = "outerScope";
 
-    var sessionEditor       = null,  // editor object for the current hinting session
-        $deferredHintObj    = null,  // deferred hint object
+    var $deferredHintObj    = null,  // deferred hint object
+        sessionEditor       = null,  // editor object for the current hinting session
+        sessionHints        = null,  // sorted hints for the current hinting session
+        sessionType         = false, // true = property, false = identifier
+        sessionContext      = null,  // the object context for the property lookup
         innerScopePending   = null,  // was an inner scope request delayed waiting for an outer scope?
         innerScopeDirty     = true,  // has the outer scope changed since the last inner scope request?
         innerScope          = null,  // the inner-most scope returned by the query worker
-        identifiers         = null,  // identifiers in the local scope
-        properties          = null,  // properties sorted by position
-        allGlobals          = {},    // dir -> file -> list of all global variables
-        allIdentifiers      = {},    // dir -> file -> list of all identifiers
-        allProperties       = {},    // dir -> file -> list of all properties
-        outerScope          = {},    // dir -> file -> outer-most scope
-        outerScopeDirty     = {},    // dir -> file -> has the path changed since the last outer scope request? 
-        outerWorkerActive   = {},    // dir -> file -> is the outer worker active for the path? 
+        scopedIdentifiers   = null,  // identifiers for the current inner scope
+        scopedProperties    = null,  // properties for the current inner scope
+        scopedAssociations  = null,  // associations for the current inner scope
+        allIdentifiers      = {},    // dir -> file -> list of identifiers for the given file
+        allGlobals          = {},    // dir -> file -> list of globals for the given file
+        allProperties       = {},    // dir -> file -> list of properties for the given file
+        allAssociations     = {},    // dir -> file -> object-property associations for the given file
+        outerScope          = {},    // dir -> file -> outer-most scope for the given file
+        outerScopeDirty     = {},    // dir -> file -> has the given file changed since the last outer scope request? 
+        outerWorkerActive   = {},    // dir -> file -> is the outer worker active for the given path? 
         outerScopeWorker    = (function () {
             var path = module.uri.substring(0, module.uri.lastIndexOf("/") + 1);
             return new Worker(path + "parser-worker.js");
         }());
+    
+    /**
+     * Is the string key perhaps a valid JavaScript identifier?
+     */
+    function maybeIdentifier(key) {
+        return (/[0-9a-z_.\$]/i).test(key);
+    }
 
+    /**
+     * Is the token's class hintable?
+     */
+    function hintableTokenClass(token) {
+        switch (token.className) {
+        case "string":
+        case "comment":
+        case "number":
+        case "regexp":
+            return false;
+        default:
+            return true;
+        }
+    }
+    
     /**
      * Creates a hint response object
      */
-    function _getHintObj() {
-
-        /*
-         * Get the token before the one at the given cursor
-         */
-        function getPreviousToken(cm, cursor, token) {
-            var doc = sessionEditor.document;
-
-            if (token.start >= 0) {
-                return cm.getTokenAt({ch: token.start,
-                                      line: cursor.line});
-            } else if (cursor.line > 0) {
-                return cm.getTokenAt({ch: doc.getLine(cursor.line - 1).length - 1,
-                                      line: cursor.line - 1});
-            }
-            
-            return null;
-        }
+    function getHintResponse(hints, cursor, token) {
 
         /**
          * Calculate a query string relative to the current cursor position
          * and token.
          */
-        function getQuery(cursor, token, prevToken, nextToken) {
+        function getQuery(cursor, token) {
             var query = "";
             if (token) {
                 if (token.string !== ".") {
@@ -95,7 +105,7 @@ define(function (require, exports, module) {
             }
             return query.trim();
         }
-
+        
         /*
          * Filter a list of tokens using a given query string
          */
@@ -142,39 +152,249 @@ define(function (require, exports, module) {
                 return $hintObj;
             });
         }
-
-        var cursor = sessionEditor.getCursorPos(),
-            cm = sessionEditor._codeMirror,
-            token = cm.getTokenAt(cursor),
-            prevToken = getPreviousToken(cm, cursor, token),
-            query = getQuery(cursor, token),
-            hints;
-
-//        console.log("Token: '" + token.string + "'");
-//        console.log("Prev: '" + (prevToken ? prevToken.string : "(null)") + "'");
-//        console.log("Query: '" + query + "'");
         
-        if ((token && (token.string === "." || token.className === "property")) ||
-                (prevToken && prevToken.string.indexOf(".") >= 0)) {
-            hints = filterWithQuery(properties, query);
-        } else {
-            hints = filterWithQuery(identifiers, query);
-        }
-
-        // Truncate large hint lists for performance reasons
-        hints = hints.slice(0, 100);
-        
+        var query           = getQuery(cursor, token),
+            filteredHints   = filterWithQuery(hints.slice(0), query).slice(0, 100),
+            formattedHints  = formatHints(filteredHints, query);
+            
         return {
-            hints: formatHints(hints, query),
+            hints: formattedHints,
             match: null,
             selectInitial: true
         };
+    }
+                             
+    function getSessionInfo(getToken, cursor, token) {
+                
+        /*
+         * Get the token before the one at the given cursor
+         */
+        function getPreviousToken(cursor, token) {
+            var doc     = sessionEditor.document,
+                prev    = token;
+
+            do {
+                if (prev.start < cursor.ch) {
+                    cursor = {ch: prev.start, line: cursor.line};
+                } else if (prev.start > 0) {
+                    cursor = {ch: prev.start - 1, line: cursor.line};
+                } else if (cursor.line > 0) {
+                    cursor = {ch: doc.getLine(cursor.line - 1).length - 1,
+                              line: cursor.line - 1};
+                } else {
+                    break;
+                }
+                prev = getToken(cursor);
+            } while (prev.string.trim() === "");
+            
+            return prev;
+        }
+                
+        var propertyLookup  = false,
+            context         = null,
+            prevToken       = getPreviousToken(cursor, token);
+                
+        if (token) {
+            if (token.className === "property") {
+                propertyLookup = true;
+                if (prevToken.string === ".") {
+                    token = prevToken;
+                    prevToken = getPreviousToken(cursor, prevToken);
+                }
+            }
+
+            if (token.string === ".") {
+                propertyLookup = true;
+                if (prevToken && hintableTokenClass(prevToken)) {
+                    context = prevToken.string;
+                }
+            }
+        }
+                
+        return {
+            type: propertyLookup,
+            context: context
+        };
+    }
+                             
+    function getSessionHints(path, cursor) {
+
+        /*
+         * Comparator for sorting tokens according to minimum distance from
+         * a given position
+         */
+        function compareByPosition(pos) {
+            function mindist(pos, t) {
+                var dist = t.positions.length ? Math.abs(t.positions[0] - pos) : Infinity,
+                    i,
+                    tmp;
+
+                for (i = 1; i < t.positions.length; i++) {
+                    tmp = Math.abs(t.positions[i] - pos);
+                    if (tmp < dist) {
+                        dist = tmp;
+                    }
+                }
+                return dist;
+            }
+
+            return function (a, b) {
+                var adist = mindist(pos, a),
+                    bdist = mindist(pos, b);
+                
+                if (adist === Infinity) {
+                    if (bdist === Infinity) {
+                        return 0;
+                    } else {
+                        return 1;
+                    }
+                } else {
+                    if (bdist === Infinity) {
+                        return -1;
+                    } else {
+                        return adist - bdist;
+                    }
+                }
+            };
+        }
+
+        /*
+         * Comparator for sorting tokens lexicographically according to scope
+         * and then minimum distance from a given position
+         */
+        function compareByScope(scope) {
+            return function (a, b) {
+                var adepth = scope.contains(a.value);
+                var bdepth = scope.contains(b.value);
+
+                if (adepth >= 0) {
+                    if (bdepth >= 0) {
+                        return adepth - bdepth;
+                    } else {
+                        return -1;
+                    }
+                } else {
+                    if (bdepth >= 0) {
+                        return 1;
+                    } else {
+                        return 0;
+                    }
+                }
+            };
+        }
+        
+        /*
+         * Comparator for sorting tokens by name
+         */
+        function compareByName(a, b) {
+            if (a.value === b.value) {
+                return 0;
+            } else if (a.value < b.value) {
+                return -1;
+            } else {
+                return 1;
+            }
+        }
+        
+        /*
+         * Comparator for sorting tokens by path, such that
+         * a <= b if a.path === path
+         */
+        function compareByPath(path) {
+            return function (a, b) {
+                if (a.path === path) {
+                    if (b.path === path) {
+                        return 0;
+                    } else {
+                        return -1;
+                    }
+                } else {
+                    if (b.path === path) {
+                        return 1;
+                    } else {
+                        return 0;
+                    }
+                }
+            };
+        }
+        
+        /*
+         * Comparator for sorting properties w.r.t. an association object.
+         */
+        function compareByAssociation(assoc) {
+            return function (a, b) {
+                if (Object.prototype.hasOwnProperty.call(assoc, a.value)) {
+                    if (Object.prototype.hasOwnProperty.call(assoc, b.value)) {
+                        return assoc[a.value] - assoc[b.value];
+                    } else {
+                        return -1;
+                    }
+                } else {
+                    if (Object.prototype.hasOwnProperty.call(assoc, b.value)) {
+                        return 1;
+                    } else {
+                        return 0;
+                    }
+                }
+            };
+        }
+
+        /*
+         * Forms the lexicographical composition of comparators
+         */
+        function lexicographic(compare1, compare2) {
+            return function (a, b) {
+                var result = compare1(a, b);
+                if (result === 0) {
+                    return compare2(a, b);
+                } else {
+                    return result;
+                }
+            };
+        }
+
+        /*
+         * A comparator for identifiers
+         */
+        function compareIdentifiers(scope, pos) {
+            return lexicographic(compareByScope(scope),
+                        lexicographic(compareByPosition(pos),
+                            compareByName));
+        }
+        
+        /*
+         * A comparator for properties
+         */
+        function compareProperties(assoc, path, pos) {
+            return lexicographic(compareByAssociation(assoc),
+                        lexicographic(compareByPath(path),
+                            lexicographic(compareByPosition(pos),
+                                compareByName)));
+        }
+
+        var offset = sessionEditor.indexFromPos(cursor),
+            hints;
+
+        if (sessionType) {
+            hints = scopedProperties.slice(0);
+            if (sessionContext &&
+                    Object.prototype.hasOwnProperty.call(scopedAssociations, sessionContext)) {
+                hints.sort(compareProperties(scopedAssociations[sessionContext], path, offset));
+            } else {
+                hints.sort(compareProperties({}, path, offset));
+            }
+        } else {
+            hints = scopedIdentifiers.slice(0);
+            hints.sort(compareIdentifiers(innerScope, offset));
+        }
+        
+        return hints;
     }
 
     /**
      * Request a new outer scope object from the parser worker, if necessary
      */
-    function _refreshOuterScope(dir, file) {
+    function refreshOuterScope(dir, file) {
                 
         // initialize outerScope, etc. at dir
         if (!outerScope.hasOwnProperty(dir)) {
@@ -194,6 +414,9 @@ define(function (require, exports, module) {
         }
         if (!allProperties.hasOwnProperty(dir)) {
             allProperties[dir] = {};
+        }
+        if (!allAssociations.hasOwnProperty(dir)) {
+            allAssociations[dir] = {};
         }
 
         // initialize outerScope[dir], etc. at file
@@ -230,9 +453,9 @@ define(function (require, exports, module) {
     }
 
     /**
-     * Recompute the inner scope for a given offset, if necessary
+     * Recompute the inner scope for a given cursor position, if necessary
      */
-    function _refreshInnerScope(dir, file, offset) {
+    function refreshInnerScope(dir, file, cursor) {
 
         /*
          * Filter a list of tokens using a given scope object
@@ -248,170 +471,109 @@ define(function (require, exports, module) {
                 }
             });
         }
+        
+        
+        
+        function merge(dir, file, init, add) {
+            var unique = {},
+                others = init[dir],
+                otherfile;
 
-        /*
-         * Comparator for sorting tokens according to minimum distance from
-         * a given position
-         */
-        function compareByPosition(pos) {
-            function mindist(pos, t) {
-                var dist = t.positions.length ? Math.abs(t.positions[0] - pos) : Infinity,
-                    i,
-                    tmp;
+            add(unique, init[dir][file]);
 
-                for (i = 1; i < t.positions.length; i++) {
-                    tmp = Math.abs(t.positions[i] - pos);
-                    if (tmp < dist) {
-                        dist = tmp;
+            for (otherfile in others) {
+                if (others.hasOwnProperty(otherfile)) {
+                    if (otherfile !== file) {
+                        add(unique, others[otherfile]);
                     }
                 }
-                return dist;
             }
 
-            return function (a, b) {
-                return mindist(pos, a) - mindist(pos, b);
-            };
+            return unique;
         }
 
-        /*
-         * Comparator for sorting tokens lexicographically according to scope
-         * and then minimum distance from a given position
-         */
-        function compareByScope(scope) {
-            return function (a, b) {
-                var adepth = scope.contains(a.value);
-                var bdepth = scope.contains(b.value);
-
-                if (adepth === bdepth) {
-                    // sort symbols at the same scope depth
-                    return 0;
-                } else if (adepth !== null && bdepth !== null) {
-                    return adepth - bdepth;
-                } else {
-                    if (adepth === null) {
-                        return bdepth;
-                    } else {
-                        return adepth;
-                    }
-                }
-            };
-        }
-        
-        /*
-         * Comparator for sorting tokens by name
-         */
-        function compareByName(a, b) {
-            return a.value < b.value;
-        }
-        
-        /*
-         * Comparator for sorting tokens by path, such that
-         * a <= b if a.path === path
-         */
-        function compareByPath(path) {
-            return function (a, b) {
-                if (a.path === path) {
-                    if (b.path === path) {
-                        return 0;
-                    } else {
-                        return -1;
-                    }
-                } else {
-                    if (b.path === path) {
-                        return 1;
-                    } else {
-                        return 0;
-                    }
-                }
-            };
-        }
-        
-        /*
-         * Forms the lexicographical composition of comparators
-         */
-        function lexicographic(compare1, compare2) {
-            return function (a, b) {
-                var result = compare1(a, b);
-                if (result === 0) {
-                    return compare2(a, b);
-                } else {
-                    return result;
-                }
-            };
-        }
-        
-        /*
-         * A comparator for identifiers
-         */
-        function compareIdentifiers(scope, pos) {
-            return lexicographic(compareByScope(scope), compareByPosition(pos));
-        }
-        
-        /*
-         * A comparator for properties
-         */
-        function compareProperties(path) {
-            return lexicographic(compareByPath(path),
-                                 lexicographic(compareByPosition(offset),
-                                               compareByName));
-        }
-        
         /*
          * Combine properties from files in the current file's directory into
          * one sorted list. 
          */
-        function mergeProperties(properties, dir, file, offset) {
-            var uniqueprops = {},
-                otherprops = [],
-                otherfile,
-                propname;
+        function mergeProperties(dir, file) {
             
-            function addin(token) {
-                if (!Object.prototype.hasOwnProperty.call(uniqueprops, token.value)) {
-                    uniqueprops[token.value] = token;
+            function addPropObjs(obj1, obj2) {
+                function addToObj(obj, token) {
+                    if (!Object.prototype.hasOwnProperty.call(obj, token.value)) {
+                        obj[token.value] = token;
+                    }
                 }
+
+                obj2.forEach(function (token) { addToObj(obj1, token); });
             }
             
-            properties.forEach(addin);
+            var propobj = merge(dir, file, allProperties, addPropObjs),
+                proplist = [],
+                propname;
             
-            otherprops = allProperties[dir];
-            for (otherfile in otherprops) {
-                if (otherprops.hasOwnProperty(otherfile)) {
-                    if (otherfile !== file) {
-                        otherprops[otherfile].forEach(addin);
+            for (propname in propobj) {
+                if (Object.prototype.hasOwnProperty.call(propobj, propname)) {
+                    proplist.push(propobj[propname]);
+                }
+            }
+
+            return proplist;
+        }
+        
+        function mergeAssociations(dir, file) {
+            function addAssocSets(list1, list2) {
+                var name;
+
+                function addAssocObjs(assoc1, assoc2) {
+                    var name;
+
+                    for (name in assoc2) {
+                        if (Object.prototype.hasOwnProperty.call(assoc2, name)) {
+                            if (Object.prototype.hasOwnProperty.call(assoc1, name)) {
+                                assoc1[name] = assoc1[name] + assoc2[name];
+                            } else {
+                                assoc1[name] = assoc2[name];
+                            }
+                        }
+                    }
+                }
+
+                for (name in list2) {
+                    if (Object.prototype.hasOwnProperty.call(list2, name)) {
+                        if (Object.prototype.hasOwnProperty.call(list1, name)) {
+                            addAssocObjs(list1[name], list2[name]);
+                        } else {
+                            list1[name] = list2[name];
+                        }
                     }
                 }
             }
             
-            otherprops = [];
-            for (propname in uniqueprops) {
-                if (Object.prototype.hasOwnProperty.call(uniqueprops, propname)) {
-                    otherprops.push(uniqueprops[propname]);
-                }
-            }
-            
-            return otherprops.sort(compareProperties(dir + file));
+            return merge(dir, file, allAssociations, addAssocSets);
         }
+        
+        var offset = sessionEditor.indexFromPos(cursor);
 
         // if there is not yet an inner scope, or if the outer scope has 
         // changed, or if the inner scope is invalid w.r.t. the current cursor
         // position we might need to update the inner scope
         if (innerScope === null || innerScopeDirty ||
                 !innerScope.containsPositionImmediate(offset)) {
-
             if (!outerScope[dir] || !outerScope[dir][file]) {
-                innerScopePending = offset;
-                _refreshOuterScope(dir, file);
+                innerScopePending = cursor;
+                refreshOuterScope(dir, file);
+                return false;
             } else {
                 if (outerWorkerActive[dir][file]) {
-                    innerScopePending = offset;
+                    innerScopePending = cursor;
                 } else {
                     innerScopePending = null;
                 }
                 innerScopeDirty = false;
                 
                 innerScope = outerScope[dir][file].findChild(offset);
-                if (!innerScope && outerScope[dir][file].range.end < offset) {
+                if (!innerScope) {
                     // we may have failed to find a child scope because a 
                     // character was added to the end of the file, outside of
                     // the (now out-of-date and currently-being-updated) 
@@ -421,36 +583,24 @@ define(function (require, exports, module) {
                     innerScope = outerScope[dir][file];
                 }
                 
-                if (innerScope) {
-                    // FIXME: This could be more efficient if instead of filtering
-                    // the entire list of identifiers we just used the identifiers
-                    // in the scope of innerScope, but that list doesn't have the
-                    // accumulated position information.
-                    var path = dir + "/" + file;
-                    identifiers = filterByScope(allIdentifiers[dir][file], innerScope);
-                    identifiers.sort(compareIdentifiers(innerScope, offset));
-                    properties = mergeProperties(allProperties[dir][file].slice(0), dir, file, offset);
-                } else {
-                    identifiers = [];
-                    properties = [];
-                }
-                identifiers = identifiers.concat(allGlobals[dir][file]);
-                identifiers = identifiers.concat(KEYWORDS);
-
-                if ($deferredHintObj !== null &&
-                        $deferredHintObj.state() === "pending") {
-                    $deferredHintObj.resolveWith(null, [_getHintObj()]);
-                }
-                
-                $deferredHintObj = null;
+                // FIXME: This could be more efficient if instead of filtering
+                // the entire list of identifiers we just used the identifiers
+                // in the scope of innerScope, but that list doesn't have the
+                // accumulated position information.
+                scopedIdentifiers = filterByScope(allIdentifiers[dir][file], innerScope);
+                scopedIdentifiers = scopedIdentifiers.concat(allGlobals[dir][file]);
+                scopedIdentifiers = scopedIdentifiers.concat(KEYWORDS);
+                scopedProperties = mergeProperties(dir, file);
+                scopedAssociations = mergeAssociations(dir, file);
             }
         }
+        return true;
     }
             
     /**
      * Divide a path into directory and filename parts
      */
-    function _splitPath(path) {
+    function splitPath(path) {
         var index   = path.lastIndexOf("/"),
             dir     = path.substring(0, index),
             file    = path.substring(index, path.length);
@@ -462,7 +612,7 @@ define(function (require, exports, module) {
      * Refresh the outer scopes of the given file as well as of the other files
      * in the given directory.
      */
-    function _refreshFile(dir, file) {
+    function refreshFile(dir, file) {
         var dirEntry = new NativeFileSystem.DirectoryEntry(dir),
             reader   = dirEntry.createReader();
         
@@ -471,16 +621,16 @@ define(function (require, exports, module) {
                 if (entry.isFile &&
                         EditorUtils.getModeFromFileExtension(entry.fullPath) === MODE_NAME) {
                     var path    = entry.fullPath,
-                        split   = _splitPath(path),
+                        split   = splitPath(path),
                         dir     = split.dir,
                         file    = split.file;
                     
-                    _refreshOuterScope(dir, file);
+                    refreshOuterScope(dir, file);
                 }
             });
         }, function (err) {
             console.log("Unable to refresh directory: " + err);
-            _refreshOuterScope(dir, file);
+            refreshOuterScope(dir, file);
         });
     }
             
@@ -488,16 +638,16 @@ define(function (require, exports, module) {
      * Reset and recompute the scope and hinting information for the given
      * editor
      */
-    function _refreshEditor(editor) {
+    function refreshEditor(editor) {
         var path    = editor.document.file.fullPath,
-            split   = _splitPath(path),
+            split   = splitPath(path),
             dir     = split.dir,
             file    = split.file;
 
         if (!sessionEditor ||
                 sessionEditor.document.file.fullPath !== path) {
-            identifiers = null;
-            properties = null;
+            scopedIdentifiers = null;
+            scopedProperties = null;
             innerScope = null;
             
             if (!outerScopeDirty.hasOwnProperty(dir)) {
@@ -512,29 +662,7 @@ define(function (require, exports, module) {
         }
         $deferredHintObj = null;
 
-        _refreshFile(dir, file);
-    }
-
-    /**
-     * Is the string key perhaps a valid JavaScript identifier?
-     */
-    function _maybeIdentifier(key) {
-        return (/[0-9a-z_.\$]/i).test(key);
-    }
-
-    /**
-     * Is the token's class hintable?
-     */
-    function _hintableTokenClass(token) {
-        switch (token.className) {
-        case "string":
-        case "comment":
-        case "number":
-        case "regexp":
-            return false;
-        default:
-            return true;
-        }
+        refreshFile(dir, file);
     }
 
     /**
@@ -543,36 +671,32 @@ define(function (require, exports, module) {
     function JSHints() {
     }
 
+    /**
+     * Determine whether hints are available for a given editor context
+     */
     JSHints.prototype.hasHints = function (editor, key) {
 
-        /*
-         * Compute the cursor's offset from the beginning of the document
-         */
-        function _cursorOffset(document, cursor) {
-            var offset = 0,
-                i;
-
-            for (i = 0; i < cursor.line; i++) {
-                // +1 for the removed line break
-                offset += document.getLine(i).length + 1;
-            }
-            offset += cursor.ch;
-            return offset;
-        }
-
-        if ((key === null) || _maybeIdentifier(key)) {
+        if ((key === null) || maybeIdentifier(key)) {
             var cursor      = editor.getCursorPos(),
-                token       = editor._codeMirror.getTokenAt(cursor);
+                cm          = editor._codeMirror,
+                token       = cm.getTokenAt(cursor);
 
             // don't autocomplete within strings or comments, etc.
-            if (token && _hintableTokenClass(token)) {
+            if (token && hintableTokenClass(token)) {
                 var path    = sessionEditor.document.file.fullPath,
-                    split   = _splitPath(path),
+                    split   = splitPath(path),
                     dir     = split.dir,
                     file    = split.file,
-                    offset  = _cursorOffset(sessionEditor.document, cursor);
+                    info;
                 
-                _refreshInnerScope(dir, file, offset);
+                if (refreshInnerScope(dir, file, cursor)) {
+                    info = getSessionInfo(cm.getTokenAt, cursor, token);
+                    sessionType = info.type;
+                    sessionContext = info.context;
+                    sessionHints = getSessionHints(path, cursor);
+                } else {
+                    sessionHints = null;
+                }
                 return true;
             }
         }
@@ -584,23 +708,39 @@ define(function (require, exports, module) {
       * context
       */
     JSHints.prototype.getHints = function (key) {
-        if ((key === null) || _maybeIdentifier(key)) {
-            var cursor = sessionEditor.getCursorPos(),
-                token  = sessionEditor._codeMirror.getTokenAt(cursor);
+        
+        /*
+         * Prepare a deferred hint object
+         */
+        function getDeferredResponse() {
+            if (!$deferredHintObj || $deferredHintObj.isRejected()) {
+                $deferredHintObj = $.Deferred();
+            }
+            return $deferredHintObj;
+        }
+        
+        if ((key === null) || maybeIdentifier(key)) {
+            var cursor  = sessionEditor.getCursorPos(),
+                cm      = sessionEditor._codeMirror,
+                token  = cm.getTokenAt(cursor);
 
-            if (token && _hintableTokenClass(token)) {
+            if (token && hintableTokenClass(token)) {
                 var path    = sessionEditor.document.file.fullPath,
-                    split   = _splitPath(path),
+                    split   = splitPath(path),
                     dir     = split.dir,
-                    file    = split.file;
+                    file    = split.file,
+                    info;
                 
-                if (outerScope[dir] && outerScope[dir][file]) {
-                    return _getHintObj();
-                } else {
-                    if (!$deferredHintObj || $deferredHintObj.isRejected()) {
-                        $deferredHintObj = $.Deferred();
+                if (sessionHints) {
+                    info = getSessionInfo(cm.getTokenAt, cursor, token);
+                    if (info.type !== sessionType || info.context !== sessionContext) {
+                        sessionType = info.type;
+                        sessionContext = info.context;
+                        sessionHints = getSessionHints(dir, file, cursor);
                     }
-                    return $deferredHintObj;
+                    return getHintResponse(sessionHints, cursor, token);
+                } else {
+                    return getDeferredResponse();
                 }
             }
         }
@@ -618,15 +758,15 @@ define(function (require, exports, module) {
         /*
          * Get the token after the one at the given cursor
          */
-        function getNextToken(cm, cursor) {
+        function getNextToken(getToken, cursor) {
             var doc = sessionEditor.document,
                 line = doc.getLine(cursor.line);
 
             if (cursor.ch < line.length) {
-                return cm.getTokenAt({ch: cursor.ch + 1,
+                return getToken({ch: cursor.ch + 1,
                                       line: cursor.line});
             } else if (doc.getLine(cursor.line + 1)) {
-                return cm.getTokenAt({ch: 0, line: cursor.line + 1});
+                return getToken({ch: 0, line: cursor.line + 1});
             } else {
                 return null;
             }
@@ -634,18 +774,18 @@ define(function (require, exports, module) {
 
         var completion  = hint.data('hint'),
             cm          = sessionEditor._codeMirror,
-            path        = sessionEditor.document.file.fullPath,
-            split       = _splitPath(path),
-            dir         = split.dir,
-            file        = split.file,
             cursor      = sessionEditor.getCursorPos(),
             token       = cm.getTokenAt(cursor),
-            nextToken   = getNextToken(cm, cursor),
+            nextToken   = getNextToken(cm.getTokenAt, cursor),
             start       = {line: cursor.line, ch: token.start},
-            end         = {line: cursor.line, ch: token.end};
+            end         = {line: cursor.line, ch: token.end},
+            path        = sessionEditor.document.file.fullPath,
+            split       = splitPath(path),
+            dir         = split.dir,
+            file        = split.file;
 
         if (token.string === "." || token.string.trim() === "") {
-            if (nextToken.string.trim() === "" || !_hintableTokenClass(nextToken)) {
+            if (nextToken.string.trim() === "" || !hintableTokenClass(nextToken)) {
                 start.ch = cursor.ch;
                 end.ch = cursor.ch;
             } else {
@@ -666,9 +806,28 @@ define(function (require, exports, module) {
          * Receive an outer scope object from the parser worker
          */
         function handleOuterScope(response) {
+
+            /*
+             * Resolve the deferred hint object with actual hints
+             */
+            function resolveDeferredHints(dir, file, cursor) {
+                if ($deferredHintObj !== null &&
+                        $deferredHintObj.state() === "pending") {
+                    var token = sessionEditor._codeMirror.getTokenAt(cursor),
+                        hintResponse;
+                        
+                    sessionHints = getSessionHints(dir, file, cursor);
+                    hintResponse = getHintResponse(sessionHints, cursor, token);
+                    $deferredHintObj.resolveWith(null, [hintResponse]);
+                }
+                        
+                $deferredHintObj = null;
+            }
+            
             var dir     = response.dir,
                 file    = response.file,
-                path    = dir + file;
+                path    = dir + file,
+                cursor;
 
             if (outerWorkerActive[dir][file]) {
                 outerWorkerActive[dir][file] = false;
@@ -685,14 +844,18 @@ define(function (require, exports, module) {
                         p.path = path;
                         return p;
                     });
+                    allAssociations[dir][file] = response.associations;
                     innerScopeDirty = true;
-    
+
                     if (outerScopeDirty[dir][file]) {
-                        _refreshOuterScope(dir, file);
+                        refreshOuterScope(dir, file);
                     }
-    
+
                     if (innerScopePending !== null) {
-                        _refreshInnerScope(dir, file, innerScopePending);
+                        cursor = innerScopePending;
+                        if (refreshInnerScope(dir, file, cursor)) {
+                            resolveDeferredHints(dir, file, cursor);
+                        }
                     }
                 }
             } else {
@@ -700,6 +863,9 @@ define(function (require, exports, module) {
             }
         }
         
+        /*
+         * Get a JS-hints-specific event name
+         */
         function eventName(name) {
             return name + "." + EVENT_TAG;
         }
@@ -713,7 +879,7 @@ define(function (require, exports, module) {
             }
             
             var path    = editor.document.file.fullPath,
-                split   = _splitPath(path),
+                split   = splitPath(path),
                 dir     = split.dir,
                 file    = split.file;
 
@@ -724,10 +890,10 @@ define(function (require, exports, module) {
                             outerScopeDirty[dir] = {};
                         }
                         outerScopeDirty[dir][file] = true;
-                        _refreshOuterScope(dir, file);
+                        refreshOuterScope(dir, file);
                     });
 
-                _refreshEditor(editor);
+                refreshEditor(editor);
             }
         }
 
@@ -768,6 +934,7 @@ define(function (require, exports, module) {
                     allGlobals          = {};
                     allIdentifiers      = {};
                     allProperties       = {};
+                    allAssociations     = {};
                     outerScope          = {};
                     outerScopeDirty     = {};
                     outerWorkerActive   = {};
@@ -777,10 +944,10 @@ define(function (require, exports, module) {
         $(DocumentManager)
             .on(eventName("fileNameChange") + EVENT_TAG,
                 function (event, oldname, newname) {
-                    var oldsplit    = _splitPath(oldname),
+                    var oldsplit    = splitPath(oldname),
                         olddir      = oldsplit.dir,
                         oldfile     = oldsplit.file,
-                        newsplit    = _splitPath(newname),
+                        newsplit    = splitPath(newname),
                         newdir      = newsplit.dir,
                         newfile     = newsplit.file;
 
@@ -803,6 +970,7 @@ define(function (require, exports, module) {
                     moveProp(allGlobals);
                     moveProp(allIdentifiers);
                     moveProp(allProperties);
+                    moveProp(allAssociations);
                 });
 
         var jsHints = new JSHints();

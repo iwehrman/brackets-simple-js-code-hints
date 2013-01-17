@@ -27,8 +27,27 @@
 
 define(function (require, exports, module) {
     "use strict";
-    
+
     function Scope(obj, parent) {
+
+        function _buildAssociations(object, property, parent) {
+            if (property.type === "Identifier") {
+                if (object.type === "Identifier") {
+                    parent.addAssociation(object, property);
+                } else if (object.type === "MemberExpression") {
+                    if (object.computed === false) {
+                        _buildAssociations(object.property, property, parent);
+                    }
+                } else {
+                    // most likely a call expression or a literal
+                    return;
+                }
+            } else {
+                // Because we restrict to non-computed property lookups, this
+                // should be unreachable
+                throw "Expected identifier but found " + property.type;
+            }
+        }
 
         function _buildScope(tree, parent) {
             var child;
@@ -221,6 +240,9 @@ define(function (require, exports, module) {
                 if (tree.property && tree.property.type === "Identifier") {
                     parent.addProperty(tree.property);
                 }
+                if (tree.computed === false) {
+                    _buildAssociations(tree.object, tree.property, parent);
+                }
                 break;
 
             case "CallExpression":
@@ -271,6 +293,7 @@ define(function (require, exports, module) {
             scope.idDeclarations = data.idDeclarations;
             scope.idOccurrences = data.idOccurrences;
             scope.propOccurrences = data.propOccurrences;
+            scope.associations = data.associations;
             scope.children = [];
 
             for (i = 0; i < data.children.length; i++) {
@@ -293,6 +316,7 @@ define(function (require, exports, module) {
             this.idDeclarations = [];
             this.idOccurrences = [];
             this.propOccurrences = [];
+            this.associations = [];
 
             this.children = []; // disjoint ranges, ordered by range start
             this.range = { start: obj.range[0], end: obj.range[1] };
@@ -321,6 +345,10 @@ define(function (require, exports, module) {
 
     Scope.prototype.addProperty = function (prop) {
         this.propOccurrences.push(prop);
+    };
+
+    Scope.prototype.addAssociation = function (obj, prop) {
+        this.associations.push({object: obj, property: prop});
     };
 
     Scope.prototype.addChildScope = function (child) {
@@ -402,31 +430,41 @@ define(function (require, exports, module) {
     /**
      * Traverse the scope down via children
      */
-    Scope.prototype.walkDown = function (add, init, prop) {
-        var result = init,
-            i;
+    Scope.prototype.walkDown = function (add, init) {
+        var result = add(this, init);
         
-        for (i = 0; i < this[prop].length; i++) {
-            result = add(result, this[prop][i]);
-        }
-        
-        for (i = 0; i < this.children.length; i++) {
-            result = this.children[i].walkDown(add, result, prop);
-        }
+        this.children.forEach(function (child) {
+            result = child.walkDown(add, result);
+        });
         
         return result;
     };
+
+    Scope.prototype.walkDownList = function (addItem, init, listName) {
+        function addList(scope, init) {
+            var list = scope[listName];
+            return list.reduce(function (prev, curr) {
+                return addItem(prev, curr);
+            }, init);
+        }
+        
+        return this.walkDown(addList, init);
+    };
         
     Scope.prototype.walkDownDeclarations = function (add, init) {
-        return this.walkDown(add, init, 'idDeclarations');
+        return this.walkDownList(add, init, 'idDeclarations');
     };
 
     Scope.prototype.walkDownIdentifiers = function (add, init) {
-        return this.walkDown(add, init, 'idOccurrences');
+        return this.walkDownList(add, init, 'idOccurrences');
     };
 
     Scope.prototype.walkDownProperties = function (add, init) {
-        return this.walkDown(add, init, 'propOccurrences');
+        return this.walkDownList(add, init, 'propOccurrences');
+    };
+
+    Scope.prototype.walkDownAssociations = function (add, init) {
+        return this.walkDownList(add, init, 'associations');
     };
     
     /**

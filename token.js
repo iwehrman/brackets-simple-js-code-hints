@@ -44,7 +44,7 @@ define(function (require, exports, module) {
         "do", "else", "finally", "for", "function", "if", "in", "instanceof",
         "new", "return", "switch", "this", "throw", "try", "typeof", "var",
         "void", "while", "with"
-    ].map(makeToken);
+    ].map(function (t) { return makeToken(t, []); });
 
     var JSL_GLOBALS = [
         "clearInterval", "clearTimeout", "document", "event", "frames",
