@@ -668,7 +668,7 @@ define(function (require, exports, module) {
         function handleOuterScope(response) {
             var dir     = response.dir,
                 file    = response.file,
-                path    = response.path;
+                path    = dir + file;
 
             if (outerWorkerActive[dir][file]) {
                 outerWorkerActive[dir][file] = false;
