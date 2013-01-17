@@ -40,20 +40,19 @@
      * Walk the scope to find all the objects of a given type, along with a
      * list of their positions in the file.
      */
-    function sift(scope, type) {
+    function sift(scope, walk) {
         var positions,
             results = [],
-            key,
-            i;
+            key;
 
-        positions = scope.walkDown(function (acc, token) {
+        positions = walk.call(scope, function (acc, token) {
             if (Object.prototype.hasOwnProperty.call(acc, token.name)) {
                 acc[token.name].push(token.range[0]);
             } else {
                 acc[token.name] = [token.range[0]];
             }
             return acc;
-        }, {}, type);
+        }, {});
         
         for (key in positions) {
             if (Object.prototype.hasOwnProperty.call(positions, key)) {
@@ -106,8 +105,8 @@
     function respond(dir, file, length, parseObj) {
         var scope = parseObj ? parseObj.scope : null,
             globals = parseObj ? parseObj.globals : null,
-            identifiers = parseObj ? sift(scope, 'identifiers') : null,
-            properties = parseObj ? sift(scope, 'properties') : null,
+            identifiers = parseObj ? sift(scope, scope.walkDownIdentifiers) : null,
+            properties = parseObj ? sift(scope, scope.walkDownProperties) : null,
             response  = {
                 type        : SCOPE_MSG_TYPE,
                 dir         : dir,
@@ -150,6 +149,7 @@
                     newline,
                     removed;
 
+                // Remove the offending line and start over
                 if (-1 < lineno < lines.length) {
                     newline = lines[lineno].replace(/./g, " ");
                     if (newline !== lines[lineno]) {

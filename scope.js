@@ -46,9 +46,13 @@ define(function (require, exports, module) {
                 break;
 
             case "FunctionDeclaration":
-                parent.addIdentifier(tree.id);
+                parent.addDeclaration(tree.id);
+                _buildScope(tree.id, parent);
                 child = new Scope(tree, parent);
-                child.addAllIdentifiers(tree.params);
+                child.addAllDeclarations(tree.params);
+                tree.params.forEach(function (t) {
+                    _buildScope(t, child);
+                });
                 parent.addChildScope(child);
                 _buildScope(tree.body, child);
                 break;
@@ -61,7 +65,8 @@ define(function (require, exports, module) {
                 break;
 
             case "VariableDeclarator":
-                parent.addIdentifier(tree.id);
+                parent.addDeclaration(tree.id);
+                _buildScope(tree.id, parent);
                 if (tree.init !== null) {
                     _buildScope(tree.init, parent);
                 }
@@ -114,7 +119,8 @@ define(function (require, exports, module) {
                 }
                 // FIXME: Is this the correct way to handle catch?
                 child = new Scope(tree, parent);
-                child.addIdentifier(tree.param);
+                child.addDeclaration(tree.param);
+                _buildScope(tree.param, child);
                 parent.addChildScope(child);
                 _buildScope(tree.body, child);
                 break;
@@ -226,11 +232,15 @@ define(function (require, exports, module) {
 
             case "FunctionExpression":
                 if (tree.id) {
-                    parent.addIdentifier(tree.id);
+                    parent.addDeclaration(tree.id);
+                    _buildScope(tree.id, parent);
                 }
                 child = new Scope(tree, parent);
                 parent.addChildScope(child);
-                child.addAllIdentifiers(tree.params);
+                child.addAllDeclarations(tree.params);
+                tree.params.forEach(function (t) {
+                    _buildScope(t, child);
+                });
                 _buildScope(tree.body, child);
                 break;
 
@@ -240,10 +250,13 @@ define(function (require, exports, module) {
                 _buildScope(tree.value, parent);
                 break;
 
+            case "Identifier":
+                parent.addIdOccurrence(tree);
+                break;
+
             case "DebuggerStatement":
             case "EmptyStatement":
             case "ThisExpression":
-            case "Identifier":
             case "Literal":
                 break;
 
@@ -254,11 +267,12 @@ define(function (require, exports, module) {
         
         function _rebuildScope(scope, data) {
             var child, i;
-            scope.identifiers = data.identifiers;
             scope.range = data.range;
-            scope.properties = data.properties;
+            scope.idDeclarations = data.idDeclarations;
+            scope.idOccurrences = data.idOccurrences;
+            scope.propOccurrences = data.propOccurrences;
             scope.children = [];
-            
+
             for (i = 0; i < data.children.length; i++) {
                 child = new Scope(data.children[i], scope);
                 scope.children.push(child);
@@ -271,13 +285,15 @@ define(function (require, exports, module) {
             this.parent = parent;
         }
 
-        if (obj.identifiers && obj.range) {
+        if (obj.idDeclarations && obj.range) {
             // the object is a data-only Scope object
             _rebuildScope(this, obj);
         } else {
             // the object is an AST
-            this.properties = [];
-            this.identifiers = [];
+            this.idDeclarations = [];
+            this.idOccurrences = [];
+            this.propOccurrences = [];
+
             this.children = []; // disjoint ranges, ordered by range start
             this.range = { start: obj.range[0], end: obj.range[1] };
         
@@ -288,19 +304,23 @@ define(function (require, exports, module) {
         }
     }
     
-    Scope.prototype.addIdentifier = function (id) {
-        this.identifiers.push(id);
+    Scope.prototype.addDeclaration = function (id) {
+        this.idDeclarations.push(id);
     };
     
-    Scope.prototype.addAllIdentifiers = function (ids) {
+    Scope.prototype.addAllDeclarations = function (ids) {
         var that = this;
         ids.forEach(function (i) {
-            that.identifiers.push(i);
+            that.idDeclarations.push(i);
         });
     };
     
+    Scope.prototype.addIdOccurrence = function (id) {
+        this.idOccurrences.push(id);
+    };
+
     Scope.prototype.addProperty = function (prop) {
-        this.properties.push(prop);
+        this.propOccurrences.push(prop);
     };
 
     Scope.prototype.addChildScope = function (child) {
@@ -333,8 +353,8 @@ define(function (require, exports, module) {
     Scope.prototype.member = function (sym) {
         var i;
         
-        for (i = 0; i < this.identifiers.length; i++) {
-            if (this.identifiers[i].name === sym) {
+        for (i = 0; i < this.idDeclarations.length; i++) {
+            if (this.idDeclarations[i].name === sym) {
                 return true;
             }
         }
@@ -397,12 +417,16 @@ define(function (require, exports, module) {
         return result;
     };
         
+    Scope.prototype.walkDownDeclarations = function (add, init) {
+        return this.walkDown(add, init, 'idDeclarations');
+    };
+
     Scope.prototype.walkDownIdentifiers = function (add, init) {
-        return this.walkDown(add, init, 'identifiers');
+        return this.walkDown(add, init, 'idOccurrences');
     };
 
     Scope.prototype.walkDownProperties = function (add, init) {
-        return this.walkDown(add, init, 'properties');
+        return this.walkDown(add, init, 'propOccurrences');
     };
     
     /**
@@ -423,27 +447,31 @@ define(function (require, exports, module) {
         return result;
     };
     
-    Scope.prototype.walkUpProperties = function (add, init) {
-        return this.walkUp(add, init, 'properties');
+    Scope.prototype.walkUpDeclarations = function (add, init) {
+        return this.walkUp(add, init, 'idDeclarations');
     };
     
     Scope.prototype.walkUpIdentifiers = function (add, init) {
-        return this.walkUp(add, init, 'identifiers');
+        return this.walkUp(add, init, 'idOccurrences');
+    };
+
+    Scope.prototype.walkUpProperties = function (add, init) {
+        return this.walkUp(add, init, 'propOccurrences');
     };
     
-    Scope.prototype.getAllIdentifiers = function () {
+    Scope.prototype.getAllDeclarations = function () {
         var ids = [],
             scope = this;
 
         do {
-            ids = ids.concat(this.identifiers);
+            ids = ids.concat(this.idDeclarations);
             scope = scope.parent;
         } while (scope !== null);
         return ids;
     };
 
     Scope.prototype.toStringBelow = function () {
-        return "[" + this.range.start + " " + this.identifiers.map(function (i) {
+        return "[" + this.range.start + " " + this.idDeclarations.map(function (i) {
             return i.name;
         }).join(", ") +
             " : " + (this.children.map(function (c) {
@@ -452,7 +480,7 @@ define(function (require, exports, module) {
     };
 
     Scope.prototype.toString = function () {
-        return "[" + this.range.start + " " + this.identifiers.map(function (i) {
+        return "[" + this.range.start + " " + this.idDeclarations.map(function (i) {
             return i.name;
         }).join(", ") + this.range.end + "]";
     };
