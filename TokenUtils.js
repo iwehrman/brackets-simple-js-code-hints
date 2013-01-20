@@ -39,6 +39,28 @@ define(function (require, exports, module) {
         };
     }
 
+    /**
+     * Is the string key perhaps a valid JavaScript identifier?
+     */
+    function maybeIdentifier(key) {
+        return (/[0-9a-z_.\$]/i).test(key);
+    }
+
+    /**
+     * Is the token's class hintable?
+     */
+    function hintable(token) {
+        switch (token.className) {
+        case "string":
+        case "comment":
+        case "number":
+        case "regexp":
+            return false;
+        default:
+            return true;
+        }
+    }
+
     var KEYWORDS = [
         "break", "case", "catch", "continue", "debugger", "default", "delete",
         "do", "else", "finally", "for", "function", "if", "in", "instanceof",
@@ -144,7 +166,9 @@ define(function (require, exports, module) {
         windows : JSL_GLOBALS_WINDOWS
     };
 
-    exports.makeToken = makeToken;
+    exports.makeToken       = makeToken;
+    exports.hintable        = hintable;
+    exports.maybeIdentifier = maybeIdentifier;
     exports.JSL_GLOBAL_DEFS = JSL_GLOBAL_DEFS;
-    exports.KEYWORDS = KEYWORDS;
+    exports.KEYWORDS        = KEYWORDS;
 });

@@ -35,8 +35,8 @@ define(function (require, exports, module) {
         NativeFileSystem        = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
         ProjectManager          = brackets.getModule("project/ProjectManager"),
         AppInit                 = brackets.getModule("utils/AppInit"),
-        Scope                   = require("scope").Scope,
-        KEYWORDS                = require("token").KEYWORDS;
+        TokenUtils              = require("TokenUtils"),
+        Scope                   = require("scope").Scope;
 
     var MODE_NAME = "javascript",
         EVENT_TAG = "brackets-js-hints",
@@ -64,28 +64,6 @@ define(function (require, exports, module) {
             var path = module.uri.substring(0, module.uri.lastIndexOf("/") + 1);
             return new Worker(path + "parser-worker.js");
         }());
-    
-    /**
-     * Is the string key perhaps a valid JavaScript identifier?
-     */
-    function maybeIdentifier(key) {
-        return (/[0-9a-z_.\$]/i).test(key);
-    }
-
-    /**
-     * Is the token's class hintable?
-     */
-    function hintableTokenClass(token) {
-        switch (token.className) {
-        case "string":
-        case "comment":
-        case "number":
-        case "regexp":
-            return false;
-        default:
-            return true;
-        }
-    }
     
     /**
      * Creates a hint response object
@@ -205,7 +183,7 @@ define(function (require, exports, module) {
 
             if (token.string === ".") {
                 propertyLookup = true;
-                if (prevToken && hintableTokenClass(prevToken)) {
+                if (prevToken && TokenUtils.hintable(prevToken)) {
                     context = prevToken.string;
                 }
             }
@@ -593,7 +571,7 @@ define(function (require, exports, module) {
                 // accumulated position information.
                 scopedIdentifiers = filterByScope(allIdentifiers[dir][file], innerScope);
                 scopedIdentifiers = scopedIdentifiers.concat(allGlobals[dir][file]);
-                scopedIdentifiers = scopedIdentifiers.concat(KEYWORDS);
+                scopedIdentifiers = scopedIdentifiers.concat(TokenUtils.KEYWORDS);
                 scopedProperties = mergeProperties(dir, file);
                 scopedAssociations = mergeAssociations(dir, file);
             }
@@ -681,13 +659,13 @@ define(function (require, exports, module) {
      */
     JSHints.prototype.hasHints = function (editor, key) {
 
-        if ((key === null) || maybeIdentifier(key)) {
+        if ((key === null) || TokenUtils.maybeIdentifier(key)) {
             var cursor      = editor.getCursorPos(),
                 cm          = editor._codeMirror,
                 token       = cm.getTokenAt(cursor);
 
             // don't autocomplete within strings or comments, etc.
-            if (token && hintableTokenClass(token)) {
+            if (token && TokenUtils.hintable(token)) {
                 var path    = sessionEditor.document.file.fullPath,
                     split   = splitPath(path),
                     dir     = split.dir,
@@ -724,12 +702,12 @@ define(function (require, exports, module) {
             return $deferredHintObj;
         }
         
-        if ((key === null) || maybeIdentifier(key)) {
+        if ((key === null) || TokenUtils.maybeIdentifier(key)) {
             var cursor  = sessionEditor.getCursorPos(),
                 cm      = sessionEditor._codeMirror,
                 token  = cm.getTokenAt(cursor);
 
-            if (token && hintableTokenClass(token)) {
+            if (token && TokenUtils.hintable(token)) {
                 var path    = sessionEditor.document.file.fullPath,
                     split   = splitPath(path),
                     dir     = split.dir,
@@ -790,7 +768,7 @@ define(function (require, exports, module) {
             file        = split.file;
 
         if (token.string === "." || token.string.trim() === "") {
-            if (nextToken.string.trim() === "" || !hintableTokenClass(nextToken)) {
+            if (nextToken.string.trim() === "" || !TokenUtils.hintable(nextToken)) {
                 start.ch = cursor.ch;
                 end.ch = cursor.ch;
             } else {
