@@ -652,6 +652,7 @@ define(function (require, exports, module) {
                 sessionEditor.document.file.fullPath !== path) {
             scopedIdentifiers = null;
             scopedProperties = null;
+            scopedAssociations = null;
             innerScope = null;
             
             if (!outerScopeDirty.hasOwnProperty(dir)) {
