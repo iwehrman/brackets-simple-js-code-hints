@@ -395,40 +395,44 @@ define(function (require, exports, module) {
      * Request a new outer scope object from the parser worker, if necessary
      */
     function refreshOuterScope(dir, file) {
-                
-        // initialize outerScope, etc. at dir
-        if (!outerScope.hasOwnProperty(dir)) {
-            outerScope[dir] = {};
-        }
-        if (!outerScopeDirty.hasOwnProperty(dir)) {
-            outerScopeDirty[dir] = {};
-        }
-        if (!outerWorkerActive.hasOwnProperty(dir)) {
-            outerWorkerActive[dir] = {};
-        }
-        if (!allGlobals.hasOwnProperty(dir)) {
-            allGlobals[dir] = {};
-        }
-        if (!allIdentifiers.hasOwnProperty(dir)) {
-            allIdentifiers[dir] = {};
-        }
-        if (!allProperties.hasOwnProperty(dir)) {
-            allProperties[dir] = {};
-        }
-        if (!allAssociations.hasOwnProperty(dir)) {
-            allAssociations[dir] = {};
+
+        function initializeFile(dir, file) {
+            // initialize outerScope, etc. at dir
+            if (!outerScope.hasOwnProperty(dir)) {
+                outerScope[dir] = {};
+            }
+            if (!outerScopeDirty.hasOwnProperty(dir)) {
+                outerScopeDirty[dir] = {};
+            }
+            if (!outerWorkerActive.hasOwnProperty(dir)) {
+                outerWorkerActive[dir] = {};
+            }
+            if (!allGlobals.hasOwnProperty(dir)) {
+                allGlobals[dir] = {};
+            }
+            if (!allIdentifiers.hasOwnProperty(dir)) {
+                allIdentifiers[dir] = {};
+            }
+            if (!allProperties.hasOwnProperty(dir)) {
+                allProperties[dir] = {};
+            }
+            if (!allAssociations.hasOwnProperty(dir)) {
+                allAssociations[dir] = {};
+            }
+
+            // initialize outerScope[dir], etc. at file
+            if (!outerScope[dir].hasOwnProperty(file)) {
+                outerScope[dir][file] = null;
+            }
+            if (!outerScopeDirty[dir].hasOwnProperty(file)) {
+                outerScopeDirty[dir][file] = true;
+            }
+            if (!outerWorkerActive[dir].hasOwnProperty(file)) {
+                outerWorkerActive[dir][file] = false;
+            }
         }
 
-        // initialize outerScope[dir], etc. at file
-        if (!outerScope[dir].hasOwnProperty(file)) {
-            outerScope[dir][file] = null;
-        }
-        if (!outerScopeDirty[dir].hasOwnProperty(file)) {
-            outerScopeDirty[dir][file] = true;
-        }
-        if (!outerWorkerActive[dir].hasOwnProperty(file)) {
-            outerWorkerActive[dir][file] = false;
-        }
+        initializeFile(dir, file);
        
         // if there is not yet an outer scope or if the file has changed then
         // we might need to update the outer scope
