@@ -30,7 +30,7 @@
     var MAX_RETRIES = 100,
         SCOPE_MSG_TYPE = "outerScope";
 
-    importScripts('esprima/esprima.js', 'scope.js', 'token.js');
+    importScripts('esprima/esprima.js', 'scope.js', 'TokenUtils.js');
 
     function _log(msg) {
         self.postMessage({log: msg });
