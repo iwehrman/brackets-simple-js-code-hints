@@ -793,13 +793,13 @@ define(function (require, exports, module) {
             /*
              * Resolve the deferred hint object with actual hints
              */
-            function resolveDeferredHints(dir, file, cursor) {
+            function resolveDeferredHints(path, cursor) {
                 if ($deferredHintObj !== null &&
                         $deferredHintObj.state() === "pending") {
                     var token = sessionEditor._codeMirror.getTokenAt(cursor),
                         hintResponse;
                         
-                    sessionHints = getSessionHints(dir, file, cursor);
+                    sessionHints = getSessionHints(path, cursor);
                     hintResponse = getHintResponse(sessionHints, cursor, token);
                     $deferredHintObj.resolveWith(null, [hintResponse]);
                 }
@@ -837,7 +837,7 @@ define(function (require, exports, module) {
                     if (innerScopePending !== null) {
                         cursor = innerScopePending;
                         if (refreshInnerScope(dir, file, cursor)) {
-                            resolveDeferredHints(dir, file, cursor);
+                            resolveDeferredHints(path, cursor);
                         }
                     }
                 }
