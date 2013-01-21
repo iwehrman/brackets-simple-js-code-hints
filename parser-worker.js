@@ -27,10 +27,9 @@
 (function () {
     'use strict';
 
-    var MAX_RETRIES = 100,
-        SCOPE_MSG_TYPE = "outerScope";
+    var MAX_RETRIES = 100;
 
-    importScripts('esprima/esprima.js', 'scope.js', 'TokenUtils.js');
+    importScripts('esprima/esprima.js', 'Scope.js', 'HintUtils.js');
 
     function _log(msg) {
         self.postMessage({log: msg });
@@ -129,7 +128,7 @@
             properties = parseObj ? siftPositions(scope, scope.walkDownProperties) : null,
             associations = parseObj ? siftAssociations(scope, scope.walkDownAssociations) : null,
             response  = {
-                type            : SCOPE_MSG_TYPE,
+                type            : self.SCOPE_MSG_TYPE,
                 dir             : dir,
                 file            : file,
                 length          : length,
@@ -194,7 +193,7 @@
         var request = e.data,
             type = request.type;
 
-        if (type === SCOPE_MSG_TYPE) {
+        if (type === self.SCOPE_MSG_TYPE) {
             var dir     = request.dir,
                 file    = request.file,
                 text    = request.text,

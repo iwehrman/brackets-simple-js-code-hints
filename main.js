@@ -22,67 +22,46 @@
  */
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
-/*global define, brackets, $, Worker */
+/*global define, brackets, $ */
 
 define(function (require, exports, module) {
     "use strict";
 
     var CodeHintManager         = brackets.getModule("editor/CodeHintManager"),
-        DocumentManager         = brackets.getModule("document/DocumentManager"),
         EditorManager           = brackets.getModule("editor/EditorManager"),
-        EditorUtils             = brackets.getModule("editor/EditorUtils"),
-        FileUtils               = brackets.getModule("file/FileUtils"),
-        NativeFileSystem        = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
-        ProjectManager          = brackets.getModule("project/ProjectManager"),
         AppInit                 = brackets.getModule("utils/AppInit"),
-        TokenUtils              = require("TokenUtils"),
-        Scope                   = require("scope").Scope;
+        HintUtils               = require("HintUtils"),
+        ScopeManager            = require("ScopeManager"),
+        Scope                   = require("Scope").Scope;
 
-    var MODE_NAME = "javascript",
-        EVENT_TAG = "brackets-js-hints",
-        SCOPE_MSG_TYPE = "outerScope";
-
-    var $deferredHintObj    = null,  // deferred hint object
+    var $deferredHints      = null,  // deferred hint object
+        $deferredScope      = null,  // deferred scope object
         sessionEditor       = null,  // editor object for the current hinting session
         sessionHints        = null,  // sorted hints for the current hinting session
-        sessionType         = false, // true = property, false = identifier
-        sessionContext      = null,  // the object context for the property lookup
-        innerScopePending   = null,  // was an inner scope request delayed waiting for an outer scope?
-        innerScopeDirty     = true,  // has the outer scope changed since the last inner scope request?
+        sessionType         = null,  // describes the lookup type and the object context
         innerScope          = null,  // the inner-most scope returned by the query worker
         scopedIdentifiers   = null,  // identifiers for the current inner scope
         scopedProperties    = null,  // properties for the current inner scope
-        scopedAssociations  = null,  // associations for the current inner scope
-        allIdentifiers      = {},    // dir -> file -> list of identifiers for the given file
-        allGlobals          = {},    // dir -> file -> list of globals for the given file
-        allProperties       = {},    // dir -> file -> list of properties for the given file
-        allAssociations     = {},    // dir -> file -> object-property associations for the given file
-        outerScope          = {},    // dir -> file -> outer-most scope for the given file
-        outerScopeDirty     = {},    // dir -> file -> has the given file changed since the last outer scope request? 
-        outerWorkerActive   = {},    // dir -> file -> is the outer worker active for the given path? 
-        outerScopeWorker    = (function () {
-            var path = module.uri.substring(0, module.uri.lastIndexOf("/") + 1);
-            return new Worker(path + "parser-worker.js");
-        }());
+        scopedAssociations  = null;  // associations for the current inner scope
+
+    /**
+     * Calculate a query string relative to the current cursor position
+     * and token.
+     */
+    function getQuery(cursor, token) {
+        var query = "";
+        if (token) {
+            if (token.string !== ".") {
+                query = token.string.substring(0, token.string.length - (token.end - cursor.ch));
+            }
+        }
+        return query.trim();
+    }
     
     /**
      * Creates a hint response object
      */
-    function getHintResponse(hints, cursor, token) {
-
-        /**
-         * Calculate a query string relative to the current cursor position
-         * and token.
-         */
-        function getQuery(cursor, token) {
-            var query = "";
-            if (token) {
-                if (token.string !== ".") {
-                    query = token.string.substring(0, token.string.length - (token.end - cursor.ch));
-                }
-            }
-            return query.trim();
-        }
+    function getResponse(hints, query) {
         
         /*
          * Filter a list of tokens using a given query string
@@ -131,8 +110,7 @@ define(function (require, exports, module) {
             });
         }
         
-        var query           = getQuery(cursor, token),
-            filteredHints   = filterWithQuery(hints.slice(0), query).slice(0, 100),
+        var filteredHints   = filterWithQuery(hints.slice(0), query).slice(0, 100),
             formattedHints  = formatHints(filteredHints, query);
             
         return {
@@ -142,7 +120,7 @@ define(function (require, exports, module) {
         };
     }
                              
-    function getSessionInfo(getToken, cursor, token) {
+    function getSessionType(getToken, cursor, token) {
                 
         /*
          * Get the token before the one at the given cursor
@@ -183,19 +161,19 @@ define(function (require, exports, module) {
 
             if (token.string === ".") {
                 propertyLookup = true;
-                if (prevToken && TokenUtils.hintable(prevToken)) {
+                if (prevToken && HintUtils.hintable(prevToken)) {
                     context = prevToken.string;
                 }
             }
         }
                 
         return {
-            type: propertyLookup,
+            property: propertyLookup,
             context: context
         };
     }
                              
-    function getSessionHints(path, cursor) {
+    function getSessionHints(path, offset, type) {
 
         /*
          * Comparator for sorting tokens according to minimum distance from
@@ -350,14 +328,13 @@ define(function (require, exports, module) {
                                 compareByName)));
         }
 
-        var offset = sessionEditor.indexFromPos(cursor),
-            hints;
+        var hints;
 
-        if (sessionType) {
+        if (type.property) {
             hints = scopedProperties.slice(0);
-            if (sessionContext &&
-                    Object.prototype.hasOwnProperty.call(scopedAssociations, sessionContext)) {
-                hints.sort(compareProperties(scopedAssociations[sessionContext], path, offset));
+            if (type.context &&
+                    Object.prototype.hasOwnProperty.call(scopedAssociations, type.context)) {
+                hints.sort(compareProperties(scopedAssociations[type.context], path, offset));
             } else {
                 hints.sort(compareProperties({}, path, offset));
             }
@@ -368,286 +345,7 @@ define(function (require, exports, module) {
         
         return hints;
     }
-
-    /**
-     * Request a new outer scope object from the parser worker, if necessary
-     */
-    function refreshOuterScope(dir, file) {
-
-        function initializeFile(dir, file) {
-            // initialize outerScope, etc. at dir
-            if (!outerScope.hasOwnProperty(dir)) {
-                outerScope[dir] = {};
-            }
-            if (!outerScopeDirty.hasOwnProperty(dir)) {
-                outerScopeDirty[dir] = {};
-            }
-            if (!outerWorkerActive.hasOwnProperty(dir)) {
-                outerWorkerActive[dir] = {};
-            }
-            if (!allGlobals.hasOwnProperty(dir)) {
-                allGlobals[dir] = {};
-            }
-            if (!allIdentifiers.hasOwnProperty(dir)) {
-                allIdentifiers[dir] = {};
-            }
-            if (!allProperties.hasOwnProperty(dir)) {
-                allProperties[dir] = {};
-            }
-            if (!allAssociations.hasOwnProperty(dir)) {
-                allAssociations[dir] = {};
-            }
-
-            // initialize outerScope[dir], etc. at file
-            if (!outerScope[dir].hasOwnProperty(file)) {
-                outerScope[dir][file] = null;
-            }
-            if (!outerScopeDirty[dir].hasOwnProperty(file)) {
-                outerScopeDirty[dir][file] = true;
-            }
-            if (!outerWorkerActive[dir].hasOwnProperty(file)) {
-                outerWorkerActive[dir][file] = false;
-            }
-        }
-
-        initializeFile(dir, file);
-       
-        // if there is not yet an outer scope or if the file has changed then
-        // we might need to update the outer scope
-        if (outerScope[dir][file] === null || outerScopeDirty[dir][file]) {
-            if (!outerWorkerActive[dir][file]) {
-                // and maybe if some time has passed without parsing... 
-                var path = dir + file,
-                    entry = new NativeFileSystem.FileEntry(path);
-                outerWorkerActive[dir][file] = true; // the outer scope worker is active
-                outerScopeDirty[dir][file] = false; // the file is clean since the last outer scope request
-                FileUtils.readAsText(entry).done(function (text) {
-                    outerScopeWorker.postMessage({
-                        type        : SCOPE_MSG_TYPE,
-                        dir         : dir,
-                        file        : file,
-                        text        : text,
-                        force       : !outerScope[dir][file]
-                    });
-                });
-            }
-        }
-    }
-
-    /**
-     * Recompute the inner scope for a given cursor position, if necessary
-     */
-    function refreshInnerScope(dir, file, cursor) {
-
-        /*
-         * Filter a list of tokens using a given scope object
-         */
-        function filterByScope(tokens, scope) {
-            return tokens.filter(function (id) {
-                var level = scope.contains(id.value);
-                if (level >= 0) {
-                    id.level = level;
-                    return true;
-                } else {
-                    return false;
-                }
-            });
-        }
-        
-        
-        
-        function merge(dir, file, init, add) {
-            var unique = {},
-                others = init[dir],
-                otherfile;
-
-            add(unique, init[dir][file]);
-
-            for (otherfile in others) {
-                if (others.hasOwnProperty(otherfile)) {
-                    if (otherfile !== file) {
-                        add(unique, others[otherfile]);
-                    }
-                }
-            }
-
-            return unique;
-        }
-
-        /*
-         * Combine properties from files in the current file's directory into
-         * one sorted list. 
-         */
-        function mergeProperties(dir, file) {
-            
-            function addPropObjs(obj1, obj2) {
-                function addToObj(obj, token) {
-                    if (!Object.prototype.hasOwnProperty.call(obj, token.value)) {
-                        obj[token.value] = token;
-                    }
-                }
-
-                obj2.forEach(function (token) { addToObj(obj1, token); });
-            }
-            
-            var propobj = merge(dir, file, allProperties, addPropObjs),
-                proplist = [],
-                propname;
-            
-            for (propname in propobj) {
-                if (Object.prototype.hasOwnProperty.call(propobj, propname)) {
-                    proplist.push(propobj[propname]);
-                }
-            }
-
-            return proplist;
-        }
-        
-        function mergeAssociations(dir, file) {
-            function addAssocSets(list1, list2) {
-                var name;
-
-                function addAssocObjs(assoc1, assoc2) {
-                    var name;
-
-                    for (name in assoc2) {
-                        if (Object.prototype.hasOwnProperty.call(assoc2, name)) {
-                            if (Object.prototype.hasOwnProperty.call(assoc1, name)) {
-                                assoc1[name] = assoc1[name] + assoc2[name];
-                            } else {
-                                assoc1[name] = assoc2[name];
-                            }
-                        }
-                    }
-                }
-
-                for (name in list2) {
-                    if (Object.prototype.hasOwnProperty.call(list2, name)) {
-                        if (Object.prototype.hasOwnProperty.call(list1, name)) {
-                            addAssocObjs(list1[name], list2[name]);
-                        } else {
-                            list1[name] = list2[name];
-                        }
-                    }
-                }
-            }
-            
-            return merge(dir, file, allAssociations, addAssocSets);
-        }
-        
-        var offset = sessionEditor.indexFromPos(cursor);
-
-        // if there is not yet an inner scope, or if the outer scope has 
-        // changed, or if the inner scope is invalid w.r.t. the current cursor
-        // position we might need to update the inner scope
-        if (innerScope === null || innerScopeDirty ||
-                !innerScope.containsPositionImmediate(offset)) {
-            if (!outerScope[dir] || !outerScope[dir][file]) {
-                innerScopePending = cursor;
-                refreshOuterScope(dir, file);
-                return false;
-            } else {
-                if (outerWorkerActive[dir][file]) {
-                    innerScopePending = cursor;
-                } else {
-                    innerScopePending = null;
-                }
-                innerScopeDirty = false;
                 
-                innerScope = outerScope[dir][file].findChild(offset);
-                if (!innerScope) {
-                    // we may have failed to find a child scope because a 
-                    // character was added to the end of the file, outside of
-                    // the (now out-of-date and currently-being-updated) 
-                    // outer scope. Hence, if offset is greater than the range
-                    // of the outerScope, we manually set innerScope to the
-                    // outerScope
-                    innerScope = outerScope[dir][file];
-                }
-                
-                // FIXME: This could be more efficient if instead of filtering
-                // the entire list of identifiers we just used the identifiers
-                // in the scope of innerScope, but that list doesn't have the
-                // accumulated position information.
-                scopedIdentifiers = filterByScope(allIdentifiers[dir][file], innerScope);
-                scopedIdentifiers = scopedIdentifiers.concat(allGlobals[dir][file]);
-                scopedIdentifiers = scopedIdentifiers.concat(TokenUtils.KEYWORDS);
-                scopedProperties = mergeProperties(dir, file);
-                scopedAssociations = mergeAssociations(dir, file);
-            }
-        }
-        return true;
-    }
-            
-    /**
-     * Divide a path into directory and filename parts
-     */
-    function splitPath(path) {
-        var index   = path.lastIndexOf("/"),
-            dir     = path.substring(0, index),
-            file    = path.substring(index, path.length);
-        
-        return {dir: dir, file: file };
-    }
-
-    /**
-     * Refresh the outer scopes of the given file as well as of the other files
-     * in the given directory.
-     */
-    function refreshFile(dir, file) {
-        var dirEntry = new NativeFileSystem.DirectoryEntry(dir),
-            reader   = dirEntry.createReader();
-        
-        reader.readEntries(function (entries) {
-            entries.forEach(function (entry) {
-                if (entry.isFile &&
-                        EditorUtils.getModeFromFileExtension(entry.fullPath) === MODE_NAME) {
-                    var path    = entry.fullPath,
-                        split   = splitPath(path),
-                        dir     = split.dir,
-                        file    = split.file;
-                    
-                    refreshOuterScope(dir, file);
-                }
-            });
-        }, function (err) {
-            console.log("Unable to refresh directory: " + err);
-            refreshOuterScope(dir, file);
-        });
-    }
-            
-    /**
-     * Reset and recompute the scope and hinting information for the given
-     * editor
-     */
-    function refreshEditor(editor) {
-        var path    = editor.document.file.fullPath,
-            split   = splitPath(path),
-            dir     = split.dir,
-            file    = split.file;
-
-        if (!sessionEditor ||
-                sessionEditor.document.file.fullPath !== path) {
-            scopedIdentifiers = null;
-            scopedProperties = null;
-            scopedAssociations = null;
-            innerScope = null;
-            
-            if (!outerScopeDirty.hasOwnProperty(dir)) {
-                outerScopeDirty[dir] = {};
-            }
-            outerScopeDirty[dir][file] = true;
-        }
-        sessionEditor = editor;
-
-        if ($deferredHintObj && $deferredHintObj.state() === "pending") {
-            $deferredHintObj.reject();
-        }
-        $deferredHintObj = null;
-
-        refreshFile(dir, file);
-    }
-
     /**
      * @constructor
      */
@@ -658,72 +356,101 @@ define(function (require, exports, module) {
      * Determine whether hints are available for a given editor context
      */
     JSHints.prototype.hasHints = function (editor, key) {
-
-        if ((key === null) || TokenUtils.maybeIdentifier(key)) {
+        
+        function handleScope(scopeInfo) {
+            var cm      = sessionEditor._codeMirror,
+                cursor  = sessionEditor.getCursorPos(),
+                offset  = sessionEditor.indexFromPos(cursor),
+                token   = cm.getTokenAt(cursor),
+                type    = getSessionType(cm.getTokenAt, cursor, token),
+                query   = getQuery(cursor, token),
+                path    = sessionEditor.document.file.fullPath,
+                response;
+    
+            innerScope = scopeInfo.scope;
+            scopedIdentifiers = scopeInfo.identifiers;
+            scopedProperties = scopeInfo.properties;
+            scopedAssociations = scopeInfo.associations;
+            sessionType = type;
+            sessionHints = getSessionHints(path, offset, sessionType);
+            
+            if ($deferredHints && $deferredHints.state() === "pending") {
+                response = getResponse(sessionHints, query);
+                $deferredHints.resolveWith(null, [response]);
+            }
+        }
+        
+        if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var cursor      = editor.getCursorPos(),
                 cm          = editor._codeMirror,
                 token       = cm.getTokenAt(cursor);
 
             // don't autocomplete within strings or comments, etc.
-            if (token && TokenUtils.hintable(token)) {
-                var path    = sessionEditor.document.file.fullPath,
-                    split   = splitPath(path),
-                    dir     = split.dir,
-                    file    = split.file,
-                    info;
+            if (token && HintUtils.hintable(token)) {
+                var path        = sessionEditor.document.file.fullPath,
+                    offset      = editor.indexFromPos(cursor),
+                    scopeInfo;
                 
-                if (refreshInnerScope(dir, file, cursor)) {
-                    info = getSessionInfo(cm.getTokenAt, cursor, token);
-                    sessionType = info.type;
-                    sessionContext = info.context;
-                    sessionHints = getSessionHints(path, cursor);
-                } else {
+                if (!innerScope || ScopeManager.isScopeDirty(path, offset, innerScope)) {
+                    scopeInfo = ScopeManager.getScope(path, offset);
                     sessionHints = null;
+                    if (scopeInfo.hasOwnProperty("deferred")) {
+                        innerScope = null;
+                        scopedIdentifiers = null;
+                        scopedProperties = null;
+                        scopedAssociations = null;
+                        
+                        $deferredScope = scopeInfo.deferred;
+                        $deferredScope.done(handleScope);
+                    } else {
+                        innerScope = scopeInfo.scope;
+                        scopedIdentifiers = scopeInfo.identifiers;
+                        scopedProperties = scopeInfo.properties;
+                        scopedAssociations = scopeInfo.associations;
+
+                        if ($deferredScope && $deferredScope.state() === "pending") {
+                            $deferredScope.reject();
+                        }
+                        $deferredScope = null;
+                    }
                 }
+
                 return true;
             }
         }
         return false;
     };
-
+            
     /** 
       * Return a list of hints, possibly deferred, for the current editor 
       * context
       */
     JSHints.prototype.getHints = function (key) {
         
-        /*
-         * Prepare a deferred hint object
-         */
-        function getDeferredResponse() {
-            if (!$deferredHintObj || $deferredHintObj.isRejected()) {
-                $deferredHintObj = $.Deferred();
-            }
-            return $deferredHintObj;
-        }
-        
-        if ((key === null) || TokenUtils.maybeIdentifier(key)) {
+        if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var cursor  = sessionEditor.getCursorPos(),
+                offset  = sessionEditor.indexFromPos(cursor),
                 cm      = sessionEditor._codeMirror,
-                token  = cm.getTokenAt(cursor);
+                token   = cm.getTokenAt(cursor);
 
-            if (token && TokenUtils.hintable(token)) {
-                var path    = sessionEditor.document.file.fullPath,
-                    split   = splitPath(path),
-                    dir     = split.dir,
-                    file    = split.file,
-                    info;
+            if (token && HintUtils.hintable(token)) {
                 
-                if (sessionHints) {
-                    info = getSessionInfo(cm.getTokenAt, cursor, token);
-                    if (info.type !== sessionType || info.context !== sessionContext) {
-                        sessionType = info.type;
-                        sessionContext = info.context;
-                        sessionHints = getSessionHints(dir, file, cursor);
+                if (innerScope) {
+                    var type    = getSessionType(cm.getTokenAt, cursor, token),
+                        query   = getQuery(cursor, token),
+                        path    = sessionEditor.document.file.fullPath;
+                    if (!sessionHints ||
+                            type.property !== sessionType.property ||
+                            type.context !== sessionType.context) {
+                        sessionType = type;
+                        sessionHints = getSessionHints(path, offset, sessionType);
                     }
-                    return getHintResponse(sessionHints, cursor, token);
-                } else {
-                    return getDeferredResponse();
+                    return getResponse(sessionHints, query);
+                } else if ($deferredScope && $deferredScope.state() === "pending") {
+                    if (!$deferredHints || $deferredHints.isRejected()) {
+                        $deferredHints = $.Deferred();
+                    }
+                    return $deferredHints;
                 }
             }
         }
@@ -761,14 +488,10 @@ define(function (require, exports, module) {
             token       = cm.getTokenAt(cursor),
             nextToken   = getNextToken(cm.getTokenAt, cursor),
             start       = {line: cursor.line, ch: token.start},
-            end         = {line: cursor.line, ch: token.end},
-            path        = sessionEditor.document.file.fullPath,
-            split       = splitPath(path),
-            dir         = split.dir,
-            file        = split.file;
+            end         = {line: cursor.line, ch: token.end};
 
         if (token.string === "." || token.string.trim() === "") {
-            if (nextToken.string.trim() === "" || !TokenUtils.hintable(nextToken)) {
+            if (nextToken.string.trim() === "" || !HintUtils.hintable(nextToken)) {
                 start.ch = cursor.ch;
                 end.ch = cursor.ch;
             } else {
@@ -778,79 +501,29 @@ define(function (require, exports, module) {
         }
 
         cm.replaceRange(completion, start, end);
-        outerScopeDirty[dir][file] = true;
         return false;
     };
 
+
     // load the extension
     AppInit.appReady(function () {
-
-        /*
-         * Receive an outer scope object from the parser worker
-         */
-        function handleOuterScope(response) {
-
-            /*
-             * Resolve the deferred hint object with actual hints
-             */
-            function resolveDeferredHints(path, cursor) {
-                if ($deferredHintObj !== null &&
-                        $deferredHintObj.state() === "pending") {
-                    var token = sessionEditor._codeMirror.getTokenAt(cursor),
-                        hintResponse;
-                        
-                    sessionHints = getSessionHints(path, cursor);
-                    hintResponse = getHintResponse(sessionHints, cursor, token);
-                    $deferredHintObj.resolveWith(null, [hintResponse]);
-                }
-                        
-                $deferredHintObj = null;
-            }
-            
-            var dir     = response.dir,
-                file    = response.file,
-                path    = dir + file,
-                cursor;
-
-            if (outerWorkerActive[dir][file]) {
-                outerWorkerActive[dir][file] = false;
-                if (response.success) {
-                    outerScope[dir][file] = new Scope(response.scope);
-                    
-                    // The outer scope should cover the entire file
-                    outerScope[dir][file].range.start = 0;
-                    outerScope[dir][file].range.end = response.length;
-                    
-                    allGlobals[dir][file] = response.globals;
-                    allIdentifiers[dir][file] = response.identifiers;
-                    allProperties[dir][file] = response.properties.map(function (p) {
-                        p.path = path;
-                        return p;
-                    });
-                    allAssociations[dir][file] = response.associations;
-                    innerScopeDirty = true;
-
-                    if (outerScopeDirty[dir][file]) {
-                        refreshOuterScope(dir, file);
-                    }
-
-                    if (innerScopePending !== null) {
-                        cursor = innerScopePending;
-                        if (refreshInnerScope(dir, file, cursor)) {
-                            resolveDeferredHints(path, cursor);
-                        }
-                    }
-                }
-            } else {
-                console.log("Expired scope request: " + path);
-            }
-        }
         
-        /*
-         * Get a JS-hints-specific event name
+        /**
+         * Reset and recompute the scope and hinting information for the given
+         * editor
          */
-        function eventName(name) {
-            return name + "." + EVENT_TAG;
+        function refreshEditor(editor) {
+            ScopeManager.handleEditorChange(editor.document.file.fullPath);
+            sessionEditor = editor;
+            scopedIdentifiers = null;
+            scopedProperties = null;
+            scopedAssociations = null;
+            innerScope = null;
+            
+            if ($deferredHints && $deferredHints.state() === "pending") {
+                $deferredHints.reject();
+            }
+            $deferredHints = null;
         }
 
         /*
@@ -861,19 +534,12 @@ define(function (require, exports, module) {
                 return;
             }
             
-            var path    = editor.document.file.fullPath,
-                split   = splitPath(path),
-                dir     = split.dir,
-                file    = split.file;
+            var path = editor.document.file.fullPath;
 
-            if (editor.getModeForSelection() === MODE_NAME) {
+            if (editor.getModeForSelection() === HintUtils.MODE_NAME) {
                 $(editor)
-                    .on(eventName("change"), function () {
-                        if (!outerScopeDirty.hasOwnProperty(dir)) {
-                            outerScopeDirty[dir] = {};
-                        }
-                        outerScopeDirty[dir][file] = true;
-                        refreshOuterScope(dir, file);
+                    .on(HintUtils.eventName("change"), function () {
+                        ScopeManager.handleFileChange(path);
                     });
 
                 refreshEditor(editor);
@@ -885,23 +551,12 @@ define(function (require, exports, module) {
          */
         function uninstallEditorListeners(editor) {
             $(editor)
-                .off(eventName("change") + EVENT_TAG);
+                .off(HintUtils.eventName("change"));
         }
-
-        outerScopeWorker.addEventListener("message", function (e) {
-            var response = e.data,
-                type = response.type;
-
-            if (type === SCOPE_MSG_TYPE) {
-                handleOuterScope(response);
-            } else {
-                console.log("Worker: " + (response.log || response));
-            }
-        });
 
         // uninstall/install change listener as the active editor changes
         $(EditorManager)
-            .on(eventName("activeEditorChange") + EVENT_TAG,
+            .on(HintUtils.eventName("activeEditorChange"),
                 function (event, current, previous) {
                     uninstallEditorListeners(previous);
                     installEditorListeners(current);
@@ -909,55 +564,9 @@ define(function (require, exports, module) {
         
         // immediately install the current editor
         installEditorListeners(EditorManager.getActiveEditor());
-        
-        // reset state on project change
-        $(ProjectManager)
-            .on(eventName("beforeProjectClose") + EVENT_TAG,
-                function (event, projectRoot) {
-                    allGlobals          = {};
-                    allIdentifiers      = {};
-                    allProperties       = {};
-                    allAssociations     = {};
-                    outerScope          = {};
-                    outerScopeDirty     = {};
-                    outerWorkerActive   = {};
-                });
-        
-        // relocate scope information on file rename
-        $(DocumentManager)
-            .on(eventName("fileNameChange") + EVENT_TAG,
-                function (event, oldname, newname) {
-                    var oldsplit    = splitPath(oldname),
-                        olddir      = oldsplit.dir,
-                        oldfile     = oldsplit.file,
-                        newsplit    = splitPath(newname),
-                        newdir      = newsplit.dir,
-                        newfile     = newsplit.file;
-
-                    /*
-                     * Move property obj[olddir][oldfile] to obj[newdir][newfile]
-                     */
-                    function moveProp(obj) {
-                        if (obj.hasOwnProperty(olddir) && obj[olddir].hasOwnProperty(oldfile)) {
-                            if (!obj.hasOwnProperty(newdir)) {
-                                obj[newdir] = {};
-                            }
-                            obj[newdir][newfile] = obj[olddir][oldfile];
-                            obj[olddir][oldfile] = null;
-                        }
-                    }
-                    
-                    moveProp(outerScope);
-                    moveProp(outerScopeDirty);
-                    moveProp(outerWorkerActive);
-                    moveProp(allGlobals);
-                    moveProp(allIdentifiers);
-                    moveProp(allProperties);
-                    moveProp(allAssociations);
-                });
 
         var jsHints = new JSHints();
-        CodeHintManager.registerHintProvider(jsHints, [MODE_NAME], 0);
+        CodeHintManager.registerHintProvider(jsHints, [HintUtils.MODE_NAME], 0);
 
         // for unit testing
         exports.jsHintProvider = jsHints;
