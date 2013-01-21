@@ -22,7 +22,7 @@
  */
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
-/*global define, brackets, $, Worker */
+/*global define, brackets, $ */
 
 define(function (require, exports, module) {
     "use strict";
@@ -30,19 +30,12 @@ define(function (require, exports, module) {
     var CodeHintManager         = brackets.getModule("editor/CodeHintManager"),
         DocumentManager         = brackets.getModule("document/DocumentManager"),
         EditorManager           = brackets.getModule("editor/EditorManager"),
-        EditorUtils             = brackets.getModule("editor/EditorUtils"),
-        FileUtils               = brackets.getModule("file/FileUtils"),
-        NativeFileSystem        = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
         ProjectManager          = brackets.getModule("project/ProjectManager"),
         AppInit                 = brackets.getModule("utils/AppInit"),
-        TokenUtils              = require("TokenUtils"),
-        ScopeManager              = require("ScopeManager"),
-        Scope                   = require("scope").Scope;
-
-    var MODE_NAME = "javascript",
-        EVENT_TAG = "brackets-js-hints",
-        SCOPE_MSG_TYPE = "outerScope";
-
+        HintUtils               = require("HintUtils"),
+        ScopeManager            = require("ScopeManager"),
+        Scope                   = require("Scope").Scope;
+    
     var $deferredHintObj    = null,  // deferred hint object
         sessionEditor       = null,  // editor object for the current hinting session
         sessionHints        = null,  // sorted hints for the current hinting session
@@ -52,25 +45,26 @@ define(function (require, exports, module) {
         scopedIdentifiers   = null,  // identifiers for the current inner scope
         scopedProperties    = null,  // properties for the current inner scope
         scopedAssociations  = null;  // associations for the current inner scope
+
+    
+    /**
+     * Calculate a query string relative to the current cursor position
+     * and token.
+     */
+    function getQuery(cursor, token) {
+        var query = "";
+        if (token) {
+            if (token.string !== ".") {
+                query = token.string.substring(0, token.string.length - (token.end - cursor.ch));
+            }
+        }
+        return query.trim();
+    }
     
     /**
      * Creates a hint response object
      */
-    function getHintResponse(hints, cursor, token) {
-
-        /**
-         * Calculate a query string relative to the current cursor position
-         * and token.
-         */
-        function getQuery(cursor, token) {
-            var query = "";
-            if (token) {
-                if (token.string !== ".") {
-                    query = token.string.substring(0, token.string.length - (token.end - cursor.ch));
-                }
-            }
-            return query.trim();
-        }
+    function getResponse(hints, query) {
         
         /*
          * Filter a list of tokens using a given query string
@@ -119,8 +113,7 @@ define(function (require, exports, module) {
             });
         }
         
-        var query           = getQuery(cursor, token),
-            filteredHints   = filterWithQuery(hints.slice(0), query).slice(0, 100),
+        var filteredHints   = filterWithQuery(hints.slice(0), query).slice(0, 100),
             formattedHints  = formatHints(filteredHints, query);
             
         return {
@@ -171,7 +164,7 @@ define(function (require, exports, module) {
 
             if (token.string === ".") {
                 propertyLookup = true;
-                if (prevToken && TokenUtils.hintable(prevToken)) {
+                if (prevToken && HintUtils.hintable(prevToken)) {
                     context = prevToken.string;
                 }
             }
@@ -356,29 +349,13 @@ define(function (require, exports, module) {
         
         return hints;
     }
-            
-    /**
-     * Divide a path into directory and filename parts
-     */
-    function splitPath(path) {
-        var index   = path.lastIndexOf("/"),
-            dir     = path.substring(0, index),
-            file    = path.substring(index, path.length);
-        
-        return {dir: dir, file: file };
-    }
-
-
-            
+    
     /**
      * Reset and recompute the scope and hinting information for the given
      * editor
      */
     function refreshEditor(editor) {
-        var path    = editor.document.file.fullPath,
-            split   = splitPath(path),
-            dir     = split.dir,
-            file    = split.file;
+        var path    = editor.document.file.fullPath;
 
         if (!sessionEditor ||
                 sessionEditor.document.file.fullPath !== path) {
@@ -387,7 +364,7 @@ define(function (require, exports, module) {
             scopedAssociations = null;
             innerScope = null;
             
-            ScopeManager.markFileDirty(dir, file);
+            ScopeManager.markFileDirty(path);
         }
         sessionEditor = editor;
 
@@ -396,7 +373,7 @@ define(function (require, exports, module) {
         }
         $deferredHintObj = null;
 
-        ScopeManager.refreshFile(dir, file);
+        ScopeManager.refreshFile(path);
     }
             
     function setScopeInfo(scopeInfo) {
@@ -426,30 +403,28 @@ define(function (require, exports, module) {
                 var cursor = sessionEditor.getCursorPos(),
                     token = sessionEditor._codeMirror.getTokenAt(cursor),
                     path = sessionEditor.document.file.fullPath,
-                    hintResponse;
+                    query = getQuery(cursor, token),
+                    response;
                 
                 setScopeInfo(scopeInfo);
                 sessionHints = getSessionHints(path, cursor);
-                hintResponse = getHintResponse(sessionHints, cursor, token);
-                $deferredHintObj.resolveWith(null, [hintResponse]);
+                response = getResponse(sessionHints, query);
+                $deferredHintObj.resolveWith(null, [response]);
             }
                     
             $deferredHintObj = null;
         }
 
-        if ((key === null) || TokenUtils.maybeIdentifier(key)) {
+        if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var cursor      = editor.getCursorPos(),
                 offset      = editor.indexFromPos(cursor),
                 cm          = editor._codeMirror,
                 token       = cm.getTokenAt(cursor);
 
             // don't autocomplete within strings or comments, etc.
-            if (token && TokenUtils.hintable(token)) {
-                var path    = sessionEditor.document.file.fullPath,
-                    split   = splitPath(path),
-                    dir     = split.dir,
-                    file    = split.file,
-                    scopeInfo = ScopeManager.getInnerScope(dir, file, offset, handleScopeInfo),
+            if (token && HintUtils.hintable(token)) {
+                var path        = sessionEditor.document.file.fullPath,
+                    scopeInfo   = ScopeManager.getInnerScope(path, offset, handleScopeInfo),
                     sessionInfo;
                 
                 if (scopeInfo) {
@@ -487,26 +462,25 @@ define(function (require, exports, module) {
             return $deferredHintObj;
         }
         
-        if ((key === null) || TokenUtils.maybeIdentifier(key)) {
+        if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var cursor  = sessionEditor.getCursorPos(),
                 cm      = sessionEditor._codeMirror,
-                token  = cm.getTokenAt(cursor);
+                token   = cm.getTokenAt(cursor),
+                path;
 
-            if (token && TokenUtils.hintable(token)) {
-                var path    = sessionEditor.document.file.fullPath,
-                    split   = splitPath(path),
-                    dir     = split.dir,
-                    file    = split.file,
-                    info;
-                
+            if (token && HintUtils.hintable(token)) {
+
                 if (sessionHints) {
-                    info = getSessionInfo(cm.getTokenAt, cursor, token);
-                    if (info.type !== sessionType || info.context !== sessionContext) {
-                        sessionType = info.type;
-                        sessionContext = info.context;
-                        sessionHints = getSessionHints(dir, file, cursor);
+                    var sessionInfo = getSessionInfo(cm.getTokenAt, cursor, token),
+                        query = getQuery(cursor, token);
+                    
+                    if (sessionInfo.type !== sessionType || sessionInfo.context !== sessionContext) {
+                        path = sessionEditor.document.file.fullPath;
+                        sessionType = sessionInfo.type;
+                        sessionContext = sessionInfo.context;
+                        sessionHints = getSessionHints(path, cursor);
                     }
-                    return getHintResponse(sessionHints, cursor, token);
+                    return getResponse(sessionHints, query);
                 } else {
                     return getDeferredResponse();
                 }
@@ -546,14 +520,10 @@ define(function (require, exports, module) {
             token       = cm.getTokenAt(cursor),
             nextToken   = getNextToken(cm.getTokenAt, cursor),
             start       = {line: cursor.line, ch: token.start},
-            end         = {line: cursor.line, ch: token.end},
-            path        = sessionEditor.document.file.fullPath,
-            split       = splitPath(path),
-            dir         = split.dir,
-            file        = split.file;
+            end         = {line: cursor.line, ch: token.end};
 
         if (token.string === "." || token.string.trim() === "") {
-            if (nextToken.string.trim() === "" || !TokenUtils.hintable(nextToken)) {
+            if (nextToken.string.trim() === "" || !HintUtils.hintable(nextToken)) {
                 start.ch = cursor.ch;
                 end.ch = cursor.ch;
             } else {
@@ -571,11 +541,12 @@ define(function (require, exports, module) {
             
     // load the extension
     AppInit.appReady(function () {
-
+        
         /*
          * Get a JS-hints-specific event name
          */
         function eventName(name) {
+            var EVENT_TAG = "brackets-js-hints";
             return name + "." + EVENT_TAG;
         }
 
@@ -587,15 +558,12 @@ define(function (require, exports, module) {
                 return;
             }
             
-            var path    = editor.document.file.fullPath,
-                split   = splitPath(path),
-                dir     = split.dir,
-                file    = split.file;
+            var path = editor.document.file.fullPath;
 
-            if (editor.getModeForSelection() === MODE_NAME) {
+            if (editor.getModeForSelection() === HintUtils.MODE_NAME) {
                 $(editor)
                     .on(eventName("change"), function () {
-                        ScopeManager.handleEditorChange(dir, file);
+                        ScopeManager.handleEditorChange(path);
                     });
 
                 refreshEditor(editor);
@@ -607,13 +575,13 @@ define(function (require, exports, module) {
          */
         function uninstallEditorListeners(editor) {
             $(editor)
-                .off(eventName("change") + EVENT_TAG);
+                .off(eventName("change"));
         }
 
 
         // uninstall/install change listener as the active editor changes
         $(EditorManager)
-            .on(eventName("activeEditorChange") + EVENT_TAG,
+            .on(eventName("activeEditorChange"),
                 function (event, current, previous) {
                     uninstallEditorListeners(previous);
                     installEditorListeners(current);
@@ -624,20 +592,20 @@ define(function (require, exports, module) {
         
         // reset state on project change
         $(ProjectManager)
-            .on(eventName("beforeProjectClose") + EVENT_TAG,
+            .on(eventName("beforeProjectClose"),
                 function (event, projectRoot) {
                     ScopeManager.reset();
                 });
         
         // relocate scope information on file rename
         $(DocumentManager)
-            .on(eventName("fileNameChange") + EVENT_TAG,
+            .on(eventName("fileNameChange"),
                 function (event, oldname, newname) {
                     ScopeManager.renameFile(oldname, newname);
                 });
 
         var jsHints = new JSHints();
-        CodeHintManager.registerHintProvider(jsHints, [MODE_NAME], 0);
+        CodeHintManager.registerHintProvider(jsHints, [HintUtils.MODE_NAME], 0);
 
         // for unit testing
         exports.jsHintProvider = jsHints;

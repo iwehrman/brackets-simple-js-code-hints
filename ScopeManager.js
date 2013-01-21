@@ -27,23 +27,13 @@
 define(function (require, exports, module) {
     "use strict";
 
-    var CodeHintManager         = brackets.getModule("editor/CodeHintManager"),
-        DocumentManager         = brackets.getModule("document/DocumentManager"),
-        EditorManager           = brackets.getModule("editor/EditorManager"),
-        EditorUtils             = brackets.getModule("editor/EditorUtils"),
+    var EditorUtils             = brackets.getModule("editor/EditorUtils"),
         FileUtils               = brackets.getModule("file/FileUtils"),
         NativeFileSystem        = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
-        ProjectManager          = brackets.getModule("project/ProjectManager"),
-        AppInit                 = brackets.getModule("utils/AppInit"),
-        TokenUtils              = require("TokenUtils"),
-        Scope                   = require("scope").Scope;
+        HintUtils               = require("HintUtils"),
+        Scope                   = require("Scope").Scope;
 
-    var MODE_NAME = "javascript",
-        EVENT_TAG = "brackets-js-hints",
-        SCOPE_MSG_TYPE = "outerScope";
-
-    var innerScopeCallback  = null,
-        innerScopePending   = null,  // was an inner scope request delayed waiting for an outer scope?
+    var pendingRequest      = null,
         innerScopeDirty     = true,  // has the outer scope changed since the last inner scope request?
         innerScope          = null,  // the inner-most scope returned by the query worker
         allIdentifiers      = {},    // dir -> file -> list of identifiers for the given file
@@ -113,7 +103,7 @@ define(function (require, exports, module) {
                 outerScopeDirty[dir][file] = false; // the file is clean since the last outer scope request
                 FileUtils.readAsText(entry).done(function (text) {
                     outerScopeWorker.postMessage({
-                        type        : SCOPE_MSG_TYPE,
+                        type        : HintUtils.SCOPE_MSG_TYPE,
                         dir         : dir,
                         file        : file,
                         text        : text,
@@ -127,7 +117,7 @@ define(function (require, exports, module) {
     /**
      * Recompute the inner scope for a given cursor position, if necessary
      */
-    function getInnerScope(dir, file, offset, handleScope) {
+    function refreshInnerScope(dir, file, offset, handleScope) {
 
         /*
          * Filter a list of tokens using a given scope object
@@ -229,18 +219,17 @@ define(function (require, exports, module) {
         if (innerScope === null || innerScopeDirty ||
                 !innerScope.containsPositionImmediate(offset)) {
             if (!outerScope[dir] || !outerScope[dir][file]) {
-                innerScopeCallback = handleScope;
-                innerScopePending = offset;
+                pendingRequest = {
+                    dir         : dir,
+                    file        : file,
+                    offset      : offset,
+                    callback    : handleScope
+                };
                 refreshOuterScope(dir, file);
                 return null;
             } else {
-                if (outerWorkerActive[dir][file]) {
-                    innerScopePending = offset;
-                } else {
-                    innerScopePending = null;
-                }
+                pendingRequest = null;
                 innerScopeDirty = false;
-                
                 innerScope = outerScope[dir][file].findChild(offset);
                 if (!innerScope) {
                     // we may have failed to find a child scope because a 
@@ -261,7 +250,7 @@ define(function (require, exports, module) {
                     scopedAssociations = mergeAssociations(dir, file);
                 
                 scopedIdentifiers = scopedIdentifiers.concat(allGlobals[dir][file]);
-                scopedIdentifiers = scopedIdentifiers.concat(TokenUtils.KEYWORDS);
+                scopedIdentifiers = scopedIdentifiers.concat(HintUtils.KEYWORDS);
                 
                 return {
                     fresh: true,
@@ -276,36 +265,38 @@ define(function (require, exports, module) {
             fresh: false
         };
     }
-            
-    /**
-     * Divide a path into directory and filename parts
-     */
-    function splitPath(path) {
-        var index   = path.lastIndexOf("/"),
-            dir     = path.substring(0, index),
-            file    = path.substring(index, path.length);
+    
+    function getInnerScope(path, offset, handleScope) {
+        var split   = HintUtils.splitPath(path),
+            dir     = split.dir,
+            file    = split.file;
         
-        return {dir: dir, file: file };
+        return refreshInnerScope(dir, file, offset, handleScope);
     }
 
     /**
      * Refresh the outer scopes of the given file as well as of the other files
      * in the given directory.
      */
-    function refreshFile(dir, file) {
-        var dirEntry = new NativeFileSystem.DirectoryEntry(dir),
-            reader   = dirEntry.createReader();
+    function refreshFile(path) {
+        var split       = HintUtils.splitPath(path),
+            dir         = split.dir,
+            file        = split.file,
+            dirEntry    = new NativeFileSystem.DirectoryEntry(dir),
+            reader      = dirEntry.createReader();
         
         reader.readEntries(function (entries) {
             entries.forEach(function (entry) {
-                if (entry.isFile &&
-                        EditorUtils.getModeFromFileExtension(entry.fullPath) === MODE_NAME) {
-                    var path    = entry.fullPath,
-                        split   = splitPath(path),
-                        dir     = split.dir,
-                        file    = split.file;
-                    
-                    refreshOuterScope(dir, file);
+                if (entry.isFile) {
+                    var mode = EditorUtils.getModeFromFileExtension(entry.fullPath);
+                    if (mode === HintUtils.MODE_NAME) {
+                        var path    = entry.fullPath,
+                            split   = HintUtils.splitPath(path),
+                            dir     = split.dir,
+                            file    = split.file;
+                        
+                        refreshOuterScope(dir, file);
+                    }
                 }
             });
         }, function (err) {
@@ -314,14 +305,22 @@ define(function (require, exports, module) {
         });
     }
             
-    function markFileDirty(dir, file) {
+    function markFileDirty(path) {
+        var split   = HintUtils.splitPath(path),
+            dir     = split.dir,
+            file    = split.file;
+        
         if (!outerScopeDirty.hasOwnProperty(dir)) {
             outerScopeDirty[dir] = {};
         }
         outerScopeDirty[dir][file] = true;
     }
 
-    function handleEditorChange(dir, file) {
+    function handleEditorChange(path) {
+        var split   = HintUtils.splitPath(path),
+            dir     = split.dir,
+            file    = split.file;
+        
         markFileDirty(dir, file);
         refreshOuterScope(dir, file);
     }
@@ -337,10 +336,10 @@ define(function (require, exports, module) {
     }
     
     function renameFile(oldname, newname) {
-        var oldsplit    = splitPath(oldname),
+        var oldsplit    = HintUtils.splitPath(oldname),
             olddir      = oldsplit.dir,
             oldfile     = oldsplit.file,
-            newsplit    = splitPath(newname),
+            newsplit    = HintUtils.splitPath(newname),
             newdir      = newsplit.dir,
             newfile     = newsplit.file;
 
@@ -376,6 +375,7 @@ define(function (require, exports, module) {
             file    = response.file,
             path    = dir + file,
             offset,
+            callback,
             scopeInfo;
 
         if (outerWorkerActive[dir][file]) {
@@ -400,11 +400,13 @@ define(function (require, exports, module) {
                     refreshOuterScope(dir, file);
                 }
 
-                if (innerScopePending !== null) {
-                    offset = innerScopePending;
-                    scopeInfo = getInnerScope(dir, file, offset);
+                if (pendingRequest !== null && pendingRequest.dir === dir &&
+                        pendingRequest.file === file) {
+                    offset = pendingRequest.offset;
+                    callback = pendingRequest.callback;
+                    scopeInfo = refreshInnerScope(dir, file, offset);
                     if (scopeInfo && scopeInfo.fresh) {
-                        innerScopeCallback(scopeInfo);
+                        callback(scopeInfo);
                     }
                 }
             }
@@ -417,7 +419,7 @@ define(function (require, exports, module) {
         var response = e.data,
             type = response.type;
 
-        if (type === SCOPE_MSG_TYPE) {
+        if (type === HintUtils.SCOPE_MSG_TYPE) {
             handleOuterScope(response);
         } else {
             console.log("Worker: " + (response.log || response));

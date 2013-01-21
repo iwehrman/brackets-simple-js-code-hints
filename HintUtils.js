@@ -60,6 +60,18 @@ define(function (require, exports, module) {
             return true;
         }
     }
+    
+                
+    /**
+     * Divide a path into directory and filename parts
+     */
+    function splitPath(path) {
+        var index   = path.lastIndexOf("/"),
+            dir     = path.substring(0, index),
+            file    = path.substring(index, path.length);
+        
+        return {dir: dir, file: file };
+    }
 
     var KEYWORDS = [
         "break", "case", "catch", "continue", "debugger", "default", "delete",
@@ -165,10 +177,16 @@ define(function (require, exports, module) {
         rhino   : JSL_GLOBALS_RHINO,
         windows : JSL_GLOBALS_WINDOWS
     };
+    
+    var MODE_NAME = "javascript",
+        SCOPE_MSG_TYPE = "outerScope";
 
     exports.makeToken       = makeToken;
     exports.hintable        = hintable;
     exports.maybeIdentifier = maybeIdentifier;
+    exports.splitPath       = splitPath;
     exports.JSL_GLOBAL_DEFS = JSL_GLOBAL_DEFS;
     exports.KEYWORDS        = KEYWORDS;
+    exports.MODE_NAME       = MODE_NAME;
+    exports.SCOPE_MSG_TYPE  = SCOPE_MSG_TYPE;
 });
