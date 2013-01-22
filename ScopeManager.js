@@ -34,20 +34,18 @@ define(function (require, exports, module) {
         Scope                   = require("Scope").Scope;
 
     var pendingRequest      = null,
-        innerScopeDirty     = true,  // has the outer scope changed since the last inner scope request?
-        innerScope          = null,  // the inner-most scope returned by the query worker
         allIdentifiers      = {},    // dir -> file -> list of identifiers for the given file
         allGlobals          = {},    // dir -> file -> list of globals for the given file
         allProperties       = {},    // dir -> file -> list of properties for the given file
         allAssociations     = {},    // dir -> file -> object-property associations for the given file
         outerScope          = {},    // dir -> file -> outer-most scope for the given file
         outerScopeDirty     = {},    // dir -> file -> has the given file changed since the last outer scope request? 
+        innerScopeDirty     = {},    // dir -> file -> has the outer scope for the given file changed since the last inner scope request?
         outerWorkerActive   = {},    // dir -> file -> is the outer worker active for the given path? 
         outerScopeWorker    = (function () {
             var path = module.uri.substring(0, module.uri.lastIndexOf("/") + 1);
             return new Worker(path + "parser-worker.js");
         }());
-    
 
     /**
      * Request a new outer scope object from the parser worker, if necessary
@@ -58,6 +56,9 @@ define(function (require, exports, module) {
             // initialize outerScope, etc. at dir
             if (!outerScope.hasOwnProperty(dir)) {
                 outerScope[dir] = {};
+            }
+            if (!innerScopeDirty.hasOwnProperty(dir)) {
+                innerScopeDirty[dir] = {};
             }
             if (!outerScopeDirty.hasOwnProperty(dir)) {
                 outerScopeDirty[dir] = {};
@@ -82,6 +83,9 @@ define(function (require, exports, module) {
             if (!outerScope[dir].hasOwnProperty(file)) {
                 outerScope[dir][file] = null;
             }
+            if (!innerScopeDirty[dir].hasOwnProperty(file)) {
+                innerScopeDirty[dir][file] = true;
+            }
             if (!outerScopeDirty[dir].hasOwnProperty(file)) {
                 outerScopeDirty[dir][file] = true;
             }
@@ -97,8 +101,8 @@ define(function (require, exports, module) {
         if (outerScope[dir][file] === null || outerScopeDirty[dir][file]) {
             if (!outerWorkerActive[dir][file]) {
                 // and maybe if some time has passed without parsing... 
-                var path = dir + file,
-                    entry = new NativeFileSystem.FileEntry(path);
+                var path    = dir + file,
+                    entry   = new NativeFileSystem.FileEntry(path);
                 outerWorkerActive[dir][file] = true; // the outer scope worker is active
                 outerScopeDirty[dir][file] = false; // the file is clean since the last outer scope request
                 FileUtils.readAsText(entry).done(function (text) {
@@ -213,72 +217,77 @@ define(function (require, exports, module) {
             return merge(dir, file, allAssociations, addAssocSets);
         }
         
-        // if there is not yet an inner scope, or if the outer scope has 
-        // changed, or if the inner scope is invalid w.r.t. the current cursor
-        // position we might need to update the inner scope
-        if (innerScope === null || innerScopeDirty ||
-                !innerScope.containsPositionImmediate(offset)) {
-            if (!outerScope[dir] || !outerScope[dir][file]) {
-                if (!pendingRequest || pendingRequest.dir !== dir || pendingRequest.file !== file) {
-                    
-                    if (pendingRequest && pendingRequest.deferred.state() === "pending") {
-                        pendingRequest.reject();
-                    }
+        if (!outerScope[dir] || !outerScope[dir][file]) {
+            if (!pendingRequest || pendingRequest.dir !== dir || pendingRequest.file !== file) {
+                
+                if (pendingRequest && pendingRequest.deferred.state() === "pending") {
+                    pendingRequest.reject();
+                }
 
-                    pendingRequest = {
-                        dir         : dir,
-                        file        : file,
-                        offset      : offset,
-                        deferred    : $.Deferred()
-                    };
-                }
-                refreshOuterScope(dir, file);
-                return { deferred: pendingRequest.deferred };
-            } else {
-                pendingRequest = null;
-                innerScopeDirty = false;
-                innerScope = outerScope[dir][file].findChild(offset);
-                if (!innerScope) {
-                    // we may have failed to find a child scope because a 
-                    // character was added to the end of the file, outside of
-                    // the (now out-of-date and currently-being-updated) 
-                    // outer scope. Hence, if offset is greater than the range
-                    // of the outerScope, we manually set innerScope to the
-                    // outerScope
-                    innerScope = outerScope[dir][file];
-                }
-                
-                // FIXME: This could be more efficient if instead of filtering
-                // the entire list of identifiers we just used the identifiers
-                // in the scope of innerScope, but that list doesn't have the
-                // accumulated position information.
-                var scopedIdentifiers = filterByScope(allIdentifiers[dir][file], innerScope),
-                    scopedProperties = mergeProperties(dir, file),
-                    scopedAssociations = mergeAssociations(dir, file);
-                
-                scopedIdentifiers = scopedIdentifiers.concat(allGlobals[dir][file]);
-                scopedIdentifiers = scopedIdentifiers.concat(HintUtils.KEYWORDS);
-                
-                return {
-                    fresh: true,
-                    scope: innerScope,
-                    identifiers: scopedIdentifiers,
-                    properties: scopedProperties,
-                    associations: scopedAssociations
+                pendingRequest = {
+                    dir         : dir,
+                    file        : file,
+                    offset      : offset,
+                    deferred    : $.Deferred()
                 };
             }
+            refreshOuterScope(dir, file);
+            return { deferred: pendingRequest.deferred };
+        } else {
+            pendingRequest = null;
+            innerScopeDirty[dir][file] = false;
+            var innerScope = outerScope[dir][file].findChild(offset);
+            if (!innerScope) {
+                // we may have failed to find a child scope because a 
+                // character was added to the end of the file, outside of
+                // the (now out-of-date and currently-being-updated) 
+                // outer scope. Hence, if offset is greater than the range
+                // of the outerScope, we manually set innerScope to the
+                // outerScope
+                innerScope = outerScope[dir][file];
+            }
+            
+            // FIXME: This could be more efficient if instead of filtering
+            // the entire list of identifiers we just used the identifiers
+            // in the scope of innerScope, but that list doesn't have the
+            // accumulated position information.
+            var scopedIdentifiers = filterByScope(allIdentifiers[dir][file], innerScope),
+                scopedProperties = mergeProperties(dir, file),
+                scopedAssociations = mergeAssociations(dir, file);
+            
+            scopedIdentifiers = scopedIdentifiers.concat(allGlobals[dir][file]);
+            scopedIdentifiers = scopedIdentifiers.concat(HintUtils.KEYWORDS);
+            
+            return {
+                scope: innerScope,
+                identifiers: scopedIdentifiers,
+                properties: scopedProperties,
+                associations: scopedAssociations
+            };
         }
-        return {
-            fresh: false
-        };
     }
     
-    function getInnerScope(path, offset) {
+    function getScope(path, offset) {
         var split   = HintUtils.splitPath(path),
             dir     = split.dir,
             file    = split.file;
         
         return refreshInnerScope(dir, file, offset);
+    }
+
+    function isScopeDirty(path, offset, scope) {
+        var split   = HintUtils.splitPath(path),
+            dir     = split.dir,
+            file    = split.file;
+        
+        return innerScopeDirty[dir][file];
+    }
+    
+    function markFileDirty(dir, file) {
+        if (!outerScopeDirty.hasOwnProperty(dir)) {
+            outerScopeDirty[dir] = {};
+        }
+        outerScopeDirty[dir][file] = true;
     }
 
     /**
@@ -292,17 +301,21 @@ define(function (require, exports, module) {
             dirEntry    = new NativeFileSystem.DirectoryEntry(dir),
             reader      = dirEntry.createReader();
         
+        markFileDirty(dir, file);
+        
         reader.readEntries(function (entries) {
             entries.forEach(function (entry) {
                 if (entry.isFile) {
-                    var mode = EditorUtils.getModeFromFileExtension(entry.fullPath);
-                    if (mode === HintUtils.MODE_NAME) {
-                        var path    = entry.fullPath,
-                            split   = HintUtils.splitPath(path),
-                            dir     = split.dir,
-                            file    = split.file;
-                        
-                        refreshOuterScope(dir, file);
+                    var path    = entry.fullPath,
+                        split   = HintUtils.splitPath(path),
+                        dir     = split.dir,
+                        file    = split.file;
+                    
+                    if (file.indexOf(".") > 1) { // ignore /.dotfiles
+                        var mode = EditorUtils.getModeFromFileExtension(entry.fullPath);
+                        if (mode === HintUtils.MODE_NAME) {
+                            refreshOuterScope(dir, file);
+                        }
                     }
                 }
             });
@@ -310,17 +323,6 @@ define(function (require, exports, module) {
             console.log("Unable to refresh directory: " + err);
             refreshOuterScope(dir, file);
         });
-    }
-            
-    function markFileDirty(path) {
-        var split   = HintUtils.splitPath(path),
-            dir     = split.dir,
-            file    = split.file;
-        
-        if (!outerScopeDirty.hasOwnProperty(dir)) {
-            outerScopeDirty[dir] = {};
-        }
-        outerScopeDirty[dir][file] = true;
     }
 
     function handleEditorChange(path) {
@@ -339,6 +341,7 @@ define(function (require, exports, module) {
         allAssociations     = {};
         outerScope          = {};
         outerScopeDirty     = {};
+        innerScopeDirty     = {};
         outerWorkerActive   = {};
     }
     
@@ -365,14 +368,14 @@ define(function (require, exports, module) {
         
         moveProp(outerScope);
         moveProp(outerScopeDirty);
+        moveProp(innerScopeDirty);
         moveProp(outerWorkerActive);
         moveProp(allGlobals);
         moveProp(allIdentifiers);
         moveProp(allProperties);
         moveProp(allAssociations);
     }
-            
-            
+
     /*
      * Receive an outer scope object from the parser worker
      */
@@ -401,7 +404,7 @@ define(function (require, exports, module) {
                     return p;
                 });
                 allAssociations[dir][file] = response.associations;
-                innerScopeDirty = true;
+                innerScopeDirty[dir][file] = true;
 
                 if (outerScopeDirty[dir][file]) {
                     refreshOuterScope(dir, file);
@@ -413,7 +416,7 @@ define(function (require, exports, module) {
                     $deferred = pendingRequest.deferred;
                     if ($deferred.state() === "pending") {
                         scopeInfo = refreshInnerScope(dir, file, offset);
-                        if (scopeInfo && scopeInfo.fresh) {
+                        if (scopeInfo && !scopeInfo.deferred) {
                             $deferred.resolveWith(null, [scopeInfo]);
                         }
                     }
@@ -435,11 +438,11 @@ define(function (require, exports, module) {
         }
     });
     
-    exports.markFileDirty = markFileDirty;
     exports.renameFile = renameFile;
     exports.reset = reset;
     exports.handleEditorChange = handleEditorChange;
-    exports.getInnerScope = getInnerScope;
+    exports.getScope = getScope;
+    exports.isScopeDirty = isScopeDirty;
     exports.refreshFile = refreshFile;
 
 });

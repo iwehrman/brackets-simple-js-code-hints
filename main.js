@@ -347,33 +347,7 @@ define(function (require, exports, module) {
         
         return hints;
     }
-    
-    /**
-     * Reset and recompute the scope and hinting information for the given
-     * editor
-     */
-    function refreshEditor(editor) {
-        var path    = editor.document.file.fullPath;
-
-        if (!sessionEditor ||
-                sessionEditor.document.file.fullPath !== path) {
-            scopedIdentifiers = null;
-            scopedProperties = null;
-            scopedAssociations = null;
-            innerScope = null;
-            
-            ScopeManager.markFileDirty(path);
-        }
-        sessionEditor = editor;
-
-        if ($deferredHints && $deferredHints.state() === "pending") {
-            $deferredHints.reject();
-        }
-        $deferredHints = null;
-
-        ScopeManager.refreshFile(path);
-    }
-            
+                
     /**
      * @constructor
      */
@@ -417,29 +391,30 @@ define(function (require, exports, module) {
             // don't autocomplete within strings or comments, etc.
             if (token && HintUtils.hintable(token)) {
                 var path        = sessionEditor.document.file.fullPath,
-                    scopeInfo   = ScopeManager.getInnerScope(path, offset);
+                    scopeInfo;
                 
-                if (scopeInfo.hasOwnProperty("deferred")) {
-                    $deferredScope = scopeInfo.deferred;
-                    $deferredScope.done(handleScope);
-                    innerScope = null;
-                    scopedIdentifiers = null;
-                    scopedProperties = null;
-                    scopedAssociations = null;
+                if (!innerScope || ScopeManager.isScopeDirty(path, offset, innerScope)) {
+                    scopeInfo = ScopeManager.getScope(path, offset);
                     sessionHints = null;
-                } else {
-                    if (scopeInfo.fresh) {
+                    if (scopeInfo.hasOwnProperty("deferred")) {
+                        innerScope = null;
+                        scopedIdentifiers = null;
+                        scopedProperties = null;
+                        scopedAssociations = null;
+                        
+                        $deferredScope = scopeInfo.deferred;
+                        $deferredScope.done(handleScope);
+                    } else {
                         innerScope = scopeInfo.scope;
                         scopedIdentifiers = scopeInfo.identifiers;
                         scopedProperties = scopeInfo.properties;
                         scopedAssociations = scopeInfo.associations;
-                        sessionHints = null;
+
+                        if ($deferredScope && $deferredScope.state() === "pending") {
+                            $deferredScope.reject();
+                        }
+                        $deferredScope = null;
                     }
-                    
-                    if ($deferredScope && $deferredScope.state() === "pending") {
-                        $deferredScope.reject();
-                    }
-                    $deferredScope = null;
                 }
 
                 return true;
@@ -534,6 +509,24 @@ define(function (require, exports, module) {
 
     // load the extension
     AppInit.appReady(function () {
+        
+        /**
+         * Reset and recompute the scope and hinting information for the given
+         * editor
+         */
+        function refreshEditor(editor) {
+            ScopeManager.refreshFile(editor.document.file.fullPath);
+            sessionEditor = editor;
+            scopedIdentifiers = null;
+            scopedProperties = null;
+            scopedAssociations = null;
+            innerScope = null;
+            
+            if ($deferredHints && $deferredHints.state() === "pending") {
+                $deferredHints.reject();
+            }
+            $deferredHints = null;
+        }
         
         /*
          * Get a JS-hints-specific event name
