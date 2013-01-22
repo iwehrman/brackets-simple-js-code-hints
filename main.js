@@ -28,9 +28,7 @@ define(function (require, exports, module) {
     "use strict";
 
     var CodeHintManager         = brackets.getModule("editor/CodeHintManager"),
-        DocumentManager         = brackets.getModule("document/DocumentManager"),
         EditorManager           = brackets.getModule("editor/EditorManager"),
-        ProjectManager          = brackets.getModule("project/ProjectManager"),
         AppInit                 = brackets.getModule("utils/AppInit"),
         HintUtils               = require("HintUtils"),
         ScopeManager            = require("ScopeManager"),
@@ -384,13 +382,13 @@ define(function (require, exports, module) {
         
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var cursor      = editor.getCursorPos(),
-                offset      = editor.indexFromPos(cursor),
                 cm          = editor._codeMirror,
                 token       = cm.getTokenAt(cursor);
 
             // don't autocomplete within strings or comments, etc.
             if (token && HintUtils.hintable(token)) {
                 var path        = sessionEditor.document.file.fullPath,
+                    offset      = editor.indexFromPos(cursor),
                     scopeInfo;
                 
                 if (!innerScope || ScopeManager.isScopeDirty(path, offset, innerScope)) {
@@ -515,7 +513,7 @@ define(function (require, exports, module) {
          * editor
          */
         function refreshEditor(editor) {
-            ScopeManager.refreshFile(editor.document.file.fullPath);
+            ScopeManager.handleEditorChange(editor.document.file.fullPath);
             sessionEditor = editor;
             scopedIdentifiers = null;
             scopedProperties = null;
@@ -526,14 +524,6 @@ define(function (require, exports, module) {
                 $deferredHints.reject();
             }
             $deferredHints = null;
-        }
-        
-        /*
-         * Get a JS-hints-specific event name
-         */
-        function eventName(name) {
-            var EVENT_TAG = "brackets-js-hints";
-            return name + "." + EVENT_TAG;
         }
 
         /*
@@ -548,8 +538,8 @@ define(function (require, exports, module) {
 
             if (editor.getModeForSelection() === HintUtils.MODE_NAME) {
                 $(editor)
-                    .on(eventName("change"), function () {
-                        ScopeManager.handleEditorChange(path);
+                    .on(HintUtils.eventName("change"), function () {
+                        ScopeManager.handleFileChange(path);
                     });
 
                 refreshEditor(editor);
@@ -561,13 +551,12 @@ define(function (require, exports, module) {
          */
         function uninstallEditorListeners(editor) {
             $(editor)
-                .off(eventName("change"));
+                .off(HintUtils.eventName("change"));
         }
-
 
         // uninstall/install change listener as the active editor changes
         $(EditorManager)
-            .on(eventName("activeEditorChange"),
+            .on(HintUtils.eventName("activeEditorChange"),
                 function (event, current, previous) {
                     uninstallEditorListeners(previous);
                     installEditorListeners(current);
@@ -575,20 +564,6 @@ define(function (require, exports, module) {
         
         // immediately install the current editor
         installEditorListeners(EditorManager.getActiveEditor());
-        
-        // reset state on project change
-        $(ProjectManager)
-            .on(eventName("beforeProjectClose"),
-                function (event, projectRoot) {
-                    ScopeManager.reset();
-                });
-        
-        // relocate scope information on file rename
-        $(DocumentManager)
-            .on(eventName("fileNameChange"),
-                function (event, oldname, newname) {
-                    ScopeManager.renameFile(oldname, newname);
-                });
 
         var jsHints = new JSHints();
         CodeHintManager.registerHintProvider(jsHints, [HintUtils.MODE_NAME], 0);

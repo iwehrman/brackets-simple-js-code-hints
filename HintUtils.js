@@ -72,6 +72,14 @@ define(function (require, exports, module) {
         
         return {dir: dir, file: file };
     }
+    
+    /*
+     * Get a JS-hints-specific event name
+     */
+    function eventName(name) {
+        var EVENT_TAG = "brackets-js-hints";
+        return name + "." + EVENT_TAG;
+    }
 
     var KEYWORDS = [
         "break", "case", "catch", "continue", "debugger", "default", "delete",
@@ -185,6 +193,7 @@ define(function (require, exports, module) {
     exports.hintable        = hintable;
     exports.maybeIdentifier = maybeIdentifier;
     exports.splitPath       = splitPath;
+    exports.eventName       = eventName;
     exports.JSL_GLOBAL_DEFS = JSL_GLOBAL_DEFS;
     exports.KEYWORDS        = KEYWORDS;
     exports.MODE_NAME       = MODE_NAME;

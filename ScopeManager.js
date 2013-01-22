@@ -27,9 +27,11 @@
 define(function (require, exports, module) {
     "use strict";
 
-    var EditorUtils             = brackets.getModule("editor/EditorUtils"),
+    var DocumentManager         = brackets.getModule("document/DocumentManager"),
+        EditorUtils             = brackets.getModule("editor/EditorUtils"),
         FileUtils               = brackets.getModule("file/FileUtils"),
         NativeFileSystem        = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
+        ProjectManager          = brackets.getModule("project/ProjectManager"),
         HintUtils               = require("HintUtils"),
         Scope                   = require("Scope").Scope;
 
@@ -294,7 +296,7 @@ define(function (require, exports, module) {
      * Refresh the outer scopes of the given file as well as of the other files
      * in the given directory.
      */
-    function refreshFile(path) {
+    function handleEditorChange(path) {
         var split       = HintUtils.splitPath(path),
             dir         = split.dir,
             file        = split.file,
@@ -325,55 +327,13 @@ define(function (require, exports, module) {
         });
     }
 
-    function handleEditorChange(path) {
+    function handleFileChange(path) {
         var split   = HintUtils.splitPath(path),
             dir     = split.dir,
             file    = split.file;
         
         markFileDirty(dir, file);
         refreshOuterScope(dir, file);
-    }
-    
-    function reset() {
-        allGlobals          = {};
-        allIdentifiers      = {};
-        allProperties       = {};
-        allAssociations     = {};
-        outerScope          = {};
-        outerScopeDirty     = {};
-        innerScopeDirty     = {};
-        outerWorkerActive   = {};
-    }
-    
-    function renameFile(oldname, newname) {
-        var oldsplit    = HintUtils.splitPath(oldname),
-            olddir      = oldsplit.dir,
-            oldfile     = oldsplit.file,
-            newsplit    = HintUtils.splitPath(newname),
-            newdir      = newsplit.dir,
-            newfile     = newsplit.file;
-
-        /*
-         * Move property obj[olddir][oldfile] to obj[newdir][newfile]
-         */
-        function moveProp(obj) {
-            if (obj.hasOwnProperty(olddir) && obj[olddir].hasOwnProperty(oldfile)) {
-                if (!obj.hasOwnProperty(newdir)) {
-                    obj[newdir] = {};
-                }
-                obj[newdir][newfile] = obj[olddir][oldfile];
-                obj[olddir][oldfile] = null;
-            }
-        }
-        
-        moveProp(outerScope);
-        moveProp(outerScopeDirty);
-        moveProp(innerScopeDirty);
-        moveProp(outerWorkerActive);
-        moveProp(allGlobals);
-        moveProp(allIdentifiers);
-        moveProp(allProperties);
-        moveProp(allAssociations);
     }
 
     /*
@@ -438,11 +398,58 @@ define(function (require, exports, module) {
         }
     });
     
-    exports.renameFile = renameFile;
-    exports.reset = reset;
+    // reset state on project change
+    $(ProjectManager)
+        .on(HintUtils.eventName("beforeProjectClose"),
+            function (event, projectRoot) {
+                allGlobals          = {};
+                allIdentifiers      = {};
+                allProperties       = {};
+                allAssociations     = {};
+                outerScope          = {};
+                outerScopeDirty     = {};
+                innerScopeDirty     = {};
+                outerWorkerActive   = {};
+            });
+    
+    // relocate scope information on file rename
+    $(DocumentManager)
+        .on(HintUtils.eventName("fileNameChange"),
+            function (event, oldname, newname) {
+                var oldsplit    = HintUtils.splitPath(oldname),
+                    olddir      = oldsplit.dir,
+                    oldfile     = oldsplit.file,
+                    newsplit    = HintUtils.splitPath(newname),
+                    newdir      = newsplit.dir,
+                    newfile     = newsplit.file;
+        
+                /*
+                 * Move property obj[olddir][oldfile] to obj[newdir][newfile]
+                 */
+                function moveProp(obj) {
+                    if (obj.hasOwnProperty(olddir) && obj[olddir].hasOwnProperty(oldfile)) {
+                        if (!obj.hasOwnProperty(newdir)) {
+                            obj[newdir] = {};
+                        }
+                        obj[newdir][newfile] = obj[olddir][oldfile];
+                        obj[olddir][oldfile] = null;
+                    }
+                }
+                
+                moveProp(outerScope);
+                moveProp(outerScopeDirty);
+                moveProp(innerScopeDirty);
+                moveProp(outerWorkerActive);
+                moveProp(allGlobals);
+                moveProp(allIdentifiers);
+                moveProp(allProperties);
+                moveProp(allAssociations);
+            });
+    
     exports.handleEditorChange = handleEditorChange;
+    exports.handleFileChange = handleFileChange;
     exports.getScope = getScope;
     exports.isScopeDirty = isScopeDirty;
-    exports.refreshFile = refreshFile;
+    
 
 });
