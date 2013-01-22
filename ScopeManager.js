@@ -219,14 +219,15 @@ define(function (require, exports, module) {
         if (innerScope === null || innerScopeDirty ||
                 !innerScope.containsPositionImmediate(offset)) {
             if (!outerScope[dir] || !outerScope[dir][file]) {
+                var $deferredScope = $.Deferred();
                 pendingRequest = {
                     dir         : dir,
                     file        : file,
                     offset      : offset,
-                    callback    : handleScope
+                    deferred    : $deferredScope
                 };
                 refreshOuterScope(dir, file);
-                return null;
+                return { deferred: $deferredScope };
             } else {
                 pendingRequest = null;
                 innerScopeDirty = false;
@@ -375,7 +376,7 @@ define(function (require, exports, module) {
             file    = response.file,
             path    = dir + file,
             offset,
-            callback,
+            $deferred,
             scopeInfo;
 
         if (outerWorkerActive[dir][file]) {
@@ -403,10 +404,10 @@ define(function (require, exports, module) {
                 if (pendingRequest !== null && pendingRequest.dir === dir &&
                         pendingRequest.file === file) {
                     offset = pendingRequest.offset;
-                    callback = pendingRequest.callback;
+                    $deferred = pendingRequest.deferred;
                     scopeInfo = refreshInnerScope(dir, file, offset);
                     if (scopeInfo && scopeInfo.fresh) {
-                        callback(scopeInfo);
+                        $deferred.resolveWith(null, [scopeInfo]);
                     }
                 }
             }

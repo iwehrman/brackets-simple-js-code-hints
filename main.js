@@ -36,7 +36,8 @@ define(function (require, exports, module) {
         ScopeManager            = require("ScopeManager"),
         Scope                   = require("Scope").Scope;
     
-    var $deferredHintObj    = null,  // deferred hint object
+    var $deferredHints      = null,  // deferred hint object
+        $deferredScope      = null,  // deferred scope object
         sessionEditor       = null,  // editor object for the current hinting session
         sessionHints        = null,  // sorted hints for the current hinting session
         sessionType         = null,  // describes the lookup type and the object context
@@ -366,19 +367,12 @@ define(function (require, exports, module) {
         }
         sessionEditor = editor;
 
-        if ($deferredHintObj && $deferredHintObj.state() === "pending") {
-            $deferredHintObj.reject();
+        if ($deferredHints && $deferredHints.state() === "pending") {
+            $deferredHints.reject();
         }
-        $deferredHintObj = null;
+        $deferredHints = null;
 
         ScopeManager.refreshFile(path);
-    }
-            
-    function setScopeInfo(scopeInfo) {
-        innerScope = scopeInfo.scope;
-        scopedIdentifiers = scopeInfo.identifiers;
-        scopedProperties = scopeInfo.properties;
-        scopedAssociations = scopeInfo.associations;
     }
 
     /**
@@ -392,28 +386,6 @@ define(function (require, exports, module) {
      */
     JSHints.prototype.hasHints = function (editor, key) {
         
-        /*
-         * Resolve the deferred hint object with actual hints
-         */
-        function handleScopeInfo(scopeInfo) {
-            if ($deferredHintObj !== null &&
-                    $deferredHintObj.state() === "pending") {
-                var cursor = sessionEditor.getCursorPos(),
-                    offset = sessionEditor.indexFromPos(cursor),
-                    token = sessionEditor._codeMirror.getTokenAt(cursor),
-                    path = sessionEditor.document.file.fullPath,
-                    query = getQuery(cursor, token),
-                    response;
-                
-                setScopeInfo(scopeInfo);
-                sessionHints = getSessionHints(path, offset);
-                response = getResponse(sessionHints, query);
-                $deferredHintObj.resolveWith(null, [response]);
-            }
-                    
-            $deferredHintObj = null;
-        }
-
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var cursor      = editor.getCursorPos(),
                 offset      = editor.indexFromPos(cursor),
@@ -423,20 +395,30 @@ define(function (require, exports, module) {
             // don't autocomplete within strings or comments, etc.
             if (token && HintUtils.hintable(token)) {
                 var path        = sessionEditor.document.file.fullPath,
-                    scopeInfo   = ScopeManager.getInnerScope(path, offset, handleScopeInfo),
-                    sessionInfo;
+                    scopeInfo   = ScopeManager.getInnerScope(path, offset);
                 
-                if (scopeInfo) {
-                    
+                if (scopeInfo.hasOwnProperty("deferred")) {
+                    $deferredScope = scopeInfo;
+                    innerScope = null;
+                    scopedIdentifiers = null;
+                    scopedProperties = null;
+                    scopedAssociations = null;
+                    sessionHints = null;
+                } else {
                     if (scopeInfo.fresh) {
-                        setScopeInfo(scopeInfo);
+                        innerScope = scopeInfo.scope;
+                        scopedIdentifiers = scopeInfo.identifiers;
+                        scopedProperties = scopeInfo.properties;
+                        scopedAssociations = scopeInfo.associations;
+                        sessionHints = null;
                     }
                     
-                    sessionType = getSessionType(cm.getTokenAt, cursor, token);
-                    sessionHints = getSessionHints(path, offset, sessionType);
-                } else {
-                    sessionHints = null;
+                    if ($deferredScope && $deferredScope.state() === "pending") {
+                        $deferredScope.reject();
+                    }
+                    $deferredScope = null;
                 }
+
                 return true;
             }
         }
@@ -453,10 +435,32 @@ define(function (require, exports, module) {
          * Prepare a deferred hint object
          */
         function getDeferredResponse() {
-            if (!$deferredHintObj || $deferredHintObj.isRejected()) {
-                $deferredHintObj = $.Deferred();
+            if (!$deferredHints || $deferredHints.isRejected()) {
+                $deferredHints = $.Deferred();
             }
-            return $deferredHintObj;
+            return $deferredHints;
+        }
+        
+        /*
+         * Resolve the deferred hint object with actual hints
+         */
+        function handleScopeInfo(scopeInfo) {
+            if ($deferredHints !== null &&
+                    $deferredHints.state() === "pending") {
+                var cursor = sessionEditor.getCursorPos(),
+                    offset = sessionEditor.indexFromPos(cursor),
+                    token = sessionEditor._codeMirror.getTokenAt(cursor),
+                    path = sessionEditor.document.file.fullPath,
+                    query = getQuery(cursor, token),
+                    response;
+                
+                setScopeInfo(scopeInfo);
+                sessionHints = getSessionHints(path, offset);
+                response = getResponse(sessionHints, query);
+                $deferredHints.resolveWith(null, [response]);
+            }
+                    
+            $deferredHints = null;
         }
         
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
