@@ -327,9 +327,14 @@ define(function (require, exports, module) {
             }
         }
     }
+
+    Scope.prototype.addIdOccurrence = function (id) {
+        this.idOccurrences.push(id);
+    };
     
     Scope.prototype.addDeclaration = function (id) {
         this.idDeclarations.push(id);
+        this.addIdOccurrence(this);
     };
     
     Scope.prototype.addAllDeclarations = function (ids) {
@@ -339,10 +344,6 @@ define(function (require, exports, module) {
         });
     };
     
-    Scope.prototype.addIdOccurrence = function (id) {
-        this.idOccurrences.push(id);
-    };
-
     Scope.prototype.addProperty = function (prop) {
         this.propOccurrences.push(prop);
     };
