@@ -35,7 +35,7 @@ define(function (require, exports, module) {
         HintUtils               = require("HintUtils"),
         ScopeManager            = require("ScopeManager"),
         Scope                   = require("Scope").Scope;
-    
+
     var $deferredHints      = null,  // deferred hint object
         $deferredScope      = null,  // deferred scope object
         sessionEditor       = null,  // editor object for the current hinting session
@@ -46,7 +46,6 @@ define(function (require, exports, module) {
         scopedProperties    = null,  // properties for the current inner scope
         scopedAssociations  = null;  // associations for the current inner scope
 
-    
     /**
      * Calculate a query string relative to the current cursor position
      * and token.
@@ -374,7 +373,7 @@ define(function (require, exports, module) {
 
         ScopeManager.refreshFile(path);
     }
-
+            
     /**
      * @constructor
      */
@@ -385,6 +384,29 @@ define(function (require, exports, module) {
      * Determine whether hints are available for a given editor context
      */
     JSHints.prototype.hasHints = function (editor, key) {
+        
+        function handleScope(scopeInfo) {
+            var cm      = sessionEditor._codeMirror,
+                cursor  = sessionEditor.getCursorPos(),
+                offset  = sessionEditor.indexFromPos(cursor),
+                token   = cm.getTokenAt(cursor),
+                type    = getSessionType(cm.getTokenAt, cursor, token),
+                query   = getQuery(cursor, token),
+                path    = sessionEditor.document.file.fullPath,
+                response;
+    
+            innerScope = scopeInfo.scope;
+            scopedIdentifiers = scopeInfo.identifiers;
+            scopedProperties = scopeInfo.properties;
+            scopedAssociations = scopeInfo.associations;
+            sessionType = type;
+            sessionHints = getSessionHints(path, offset, sessionType);
+            
+            if ($deferredHints && $deferredHints.state() === "pending") {
+                response = getResponse(sessionHints, query);
+                $deferredHints.resolveWith(null, [response]);
+            }
+        }
         
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var cursor      = editor.getCursorPos(),
@@ -398,7 +420,8 @@ define(function (require, exports, module) {
                     scopeInfo   = ScopeManager.getInnerScope(path, offset);
                 
                 if (scopeInfo.hasOwnProperty("deferred")) {
-                    $deferredScope = scopeInfo;
+                    $deferredScope = scopeInfo.deferred;
+                    $deferredScope.done(handleScope);
                     innerScope = null;
                     scopedIdentifiers = null;
                     scopedProperties = null;
@@ -424,65 +447,37 @@ define(function (require, exports, module) {
         }
         return false;
     };
-
+            
     /** 
       * Return a list of hints, possibly deferred, for the current editor 
       * context
       */
     JSHints.prototype.getHints = function (key) {
         
-        /*
-         * Prepare a deferred hint object
-         */
-        function getDeferredResponse() {
-            if (!$deferredHints || $deferredHints.isRejected()) {
-                $deferredHints = $.Deferred();
-            }
-            return $deferredHints;
-        }
-        
-        /*
-         * Resolve the deferred hint object with actual hints
-         */
-        function handleScopeInfo(scopeInfo) {
-            if ($deferredHints !== null &&
-                    $deferredHints.state() === "pending") {
-                var cursor = sessionEditor.getCursorPos(),
-                    offset = sessionEditor.indexFromPos(cursor),
-                    token = sessionEditor._codeMirror.getTokenAt(cursor),
-                    path = sessionEditor.document.file.fullPath,
-                    query = getQuery(cursor, token),
-                    response;
-                
-                setScopeInfo(scopeInfo);
-                sessionHints = getSessionHints(path, offset);
-                response = getResponse(sessionHints, query);
-                $deferredHints.resolveWith(null, [response]);
-            }
-                    
-            $deferredHints = null;
-        }
-        
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var cursor  = sessionEditor.getCursorPos(),
+                offset  = sessionEditor.indexFromPos(cursor),
                 cm      = sessionEditor._codeMirror,
-                token   = cm.getTokenAt(cursor),
-                path;
+                token   = cm.getTokenAt(cursor);
 
             if (token && HintUtils.hintable(token)) {
-
-                if (sessionHints) {
-                    var type = getSessionType(cm.getTokenAt, cursor, token),
-                        query = getQuery(cursor, token);
-                    
-                    if (type !== sessionType) {
-                        path = sessionEditor.document.file.fullPath;
+                
+                if (innerScope) {
+                    var type    = getSessionType(cm.getTokenAt, cursor, token),
+                        query   = getQuery(cursor, token),
+                        path    = sessionEditor.document.file.fullPath;
+                    if (!sessionHints ||
+                            type.property !== sessionType.property ||
+                            type.context !== sessionType.context) {
                         sessionType = type;
-                        sessionHints = getSessionHints(path, cursor, sessionType);
+                        sessionHints = getSessionHints(path, offset, sessionType);
                     }
                     return getResponse(sessionHints, query);
-                } else {
-                    return getDeferredResponse();
+                } else if ($deferredScope && $deferredScope.state() === "pending") {
+                    if (!$deferredHints || $deferredHints.isRejected()) {
+                        $deferredHints = $.Deferred();
+                    }
+                    return $deferredHints;
                 }
             }
         }
@@ -536,9 +531,7 @@ define(function (require, exports, module) {
         return false;
     };
 
-            
-            
-            
+
     // load the extension
     AppInit.appReady(function () {
         

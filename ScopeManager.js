@@ -117,7 +117,7 @@ define(function (require, exports, module) {
     /**
      * Recompute the inner scope for a given cursor position, if necessary
      */
-    function refreshInnerScope(dir, file, offset, handleScope) {
+    function refreshInnerScope(dir, file, offset) {
 
         /*
          * Filter a list of tokens using a given scope object
@@ -219,15 +219,21 @@ define(function (require, exports, module) {
         if (innerScope === null || innerScopeDirty ||
                 !innerScope.containsPositionImmediate(offset)) {
             if (!outerScope[dir] || !outerScope[dir][file]) {
-                var $deferredScope = $.Deferred();
-                pendingRequest = {
-                    dir         : dir,
-                    file        : file,
-                    offset      : offset,
-                    deferred    : $deferredScope
-                };
+                if (!pendingRequest || pendingRequest.dir !== dir || pendingRequest.file !== file) {
+                    
+                    if (pendingRequest && pendingRequest.deferred.state() === "pending") {
+                        pendingRequest.reject();
+                    }
+
+                    pendingRequest = {
+                        dir         : dir,
+                        file        : file,
+                        offset      : offset,
+                        deferred    : $.Deferred()
+                    };
+                }
                 refreshOuterScope(dir, file);
-                return { deferred: $deferredScope };
+                return { deferred: pendingRequest.deferred };
             } else {
                 pendingRequest = null;
                 innerScopeDirty = false;
@@ -267,12 +273,12 @@ define(function (require, exports, module) {
         };
     }
     
-    function getInnerScope(path, offset, handleScope) {
+    function getInnerScope(path, offset) {
         var split   = HintUtils.splitPath(path),
             dir     = split.dir,
             file    = split.file;
         
-        return refreshInnerScope(dir, file, offset, handleScope);
+        return refreshInnerScope(dir, file, offset);
     }
 
     /**
@@ -405,9 +411,11 @@ define(function (require, exports, module) {
                         pendingRequest.file === file) {
                     offset = pendingRequest.offset;
                     $deferred = pendingRequest.deferred;
-                    scopeInfo = refreshInnerScope(dir, file, offset);
-                    if (scopeInfo && scopeInfo.fresh) {
-                        $deferred.resolveWith(null, [scopeInfo]);
+                    if ($deferred.state() === "pending") {
+                        scopeInfo = refreshInnerScope(dir, file, offset);
+                        if (scopeInfo && scopeInfo.fresh) {
+                            $deferred.resolveWith(null, [scopeInfo]);
+                        }
                     }
                 }
             }
