@@ -34,7 +34,7 @@ define(function (require, exports, module) {
         ScopeManager            = require("ScopeManager"),
         Session                 = require("Session").Session;
 
-    var session             = null,
+    var session             = null,  // object that encapsulates the current session state
         cachedHints         = null,  // sorted hints for the current hinting session
         cachedType          = null,  // describes the lookup type and the object context
         cachedScope         = null,  // the inner-most scope returned by the query worker
@@ -90,6 +90,18 @@ define(function (require, exports, module) {
                     break;
                 }
 
+                switch (token.global) {
+                case true:
+                    $hintObj.css('font-style', 'italic');
+                    break;
+                }
+                
+                switch (token.keyword) {
+                case true:
+                    $hintObj.css('font-family', 'monospace');
+                    break;
+                }
+                
                 return $hintObj;
             });
         }

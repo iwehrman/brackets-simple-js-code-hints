@@ -131,12 +131,7 @@ define(function (require, exports, module) {
         function filterByScope(tokens, scope) {
             return tokens.filter(function (id) {
                 var level = scope.contains(id.value);
-                if (level >= 0) {
-                    id.level = level;
-                    return true;
-                } else {
-                    return false;
-                }
+                return (level >= 0);
             });
         }
         
@@ -257,12 +252,10 @@ define(function (require, exports, module) {
                 scopedProperties = mergeProperties(dir, file),
                 scopedAssociations = mergeAssociations(dir, file);
             
-            scopedIdentifiers = scopedIdentifiers.concat(allGlobals[dir][file]);
-            scopedIdentifiers = scopedIdentifiers.concat(HintUtils.KEYWORDS);
-            
             return {
                 scope: innerScope,
                 identifiers: scopedIdentifiers,
+                globals: allGlobals[dir][file],
                 properties: scopedProperties,
                 associations: scopedAssociations
             };

@@ -26,7 +26,7 @@
 
 define(function (require, exports, module) {
     "use strict";
-    
+
     var HintUtils       = require("HintUtils"),
         ScopeManager    = require("ScopeManager");
 
@@ -34,10 +34,11 @@ define(function (require, exports, module) {
         this.editor = editor;
         this.path = editor.document.file.fullPath;
     }
-    
+
     Session.prototype.setScopeInfo = function (scopeInfo) {
         this.scope = scopeInfo.scope;
         this.identifiers = scopeInfo.identifiers;
+        this.globals = scopeInfo.globals;
         this.properties = scopeInfo.properties;
         this.associations = scopeInfo.associations;
     };
@@ -310,22 +311,62 @@ define(function (require, exports, module) {
                                 compareByName)));
         }
         
+        function annotateIdentifers(identifiers, scope) {
+            return identifiers.map(function (t) {
+                var level = scope.contains(t.value);
+                
+                if (level >= 0) {
+                    t.level = level;
+                }
+                return t;
+            });
+        }
+        
+        function annotateProperties(properties, association) {
+            return properties.map(function (t) {
+                if (association[t.value] > 0) {
+                    t.level = 0;
+                }
+                return t;
+            });
+        }
+        
+        function annotateGlobals(globals) {
+            return globals.map(function (t) {
+                t.global = true;
+                return t;
+            });
+        }
+        
+        function annotateKeywords(keywords) {
+            return keywords.map(function (t) {
+                t.keyword = true;
+                return t;
+            });
+        }
+        
         var cursor = this.editor.getCursorPos(),
             offset = this.editor.indexFromPos(cursor),
             type = this.getType(),
+            association,
             hints;
 
         if (type.property) {
             hints = this.properties.slice(0);
             if (type.context &&
                     Object.prototype.hasOwnProperty.call(this.associations, type.context)) {
-                hints.sort(compareProperties(this.associations[type.context], this.path, offset));
+                association = this.associations[type.context];
+                hints = annotateProperties(hints, association);
+                hints.sort(compareProperties(association, this.path, offset));
             } else {
                 hints.sort(compareProperties({}, this.path, offset));
             }
         } else {
             hints = this.identifiers.slice(0);
             hints.sort(compareIdentifiers(this.scope, offset));
+            hints = hints.concat(annotateGlobals(this.globals.slice(0)));
+            hints = hints.concat(annotateKeywords(HintUtils.KEYWORDS));
+            hints = annotateIdentifers(hints, this.scope);
         }
         
         return hints;
