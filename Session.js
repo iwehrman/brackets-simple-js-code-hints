@@ -42,11 +42,11 @@ define(function (require, exports, module) {
         this.properties = scopeInfo.properties;
         this.associations = scopeInfo.associations;
     };
-    
+
     Session.prototype.getPath = function () {
         return this.path;
     };
-    
+
     Session.prototype.getCursor = function () {
         return this.editor.getCursorPos();
     };
@@ -86,18 +86,19 @@ define(function (require, exports, module) {
     /**
      * Get the token before the one at the given cursor
      */
-    Session.prototype._getPreviousToken = function (cursor, token) {
-        var doc     = this.editor.document,
+    Session.prototype._getPreviousToken = function (cursor) {
+        var token   = this.editor._codeMirror.getTokenAt(cursor),
+            doc     = this.editor.document,
             prev    = token;
 
         do {
             if (prev.start < cursor.ch) {
-                cursor = {ch: prev.start, line: cursor.line};
+                cursor.ch = prev.start;
             } else if (prev.start > 0) {
-                cursor = {ch: prev.start - 1, line: cursor.line};
+                cursor.ch = prev.start - 1;
             } else if (cursor.line > 0) {
-                cursor = {ch: doc.getLine(cursor.line - 1).length - 1,
-                          line: cursor.line - 1};
+                cursor.ch = doc.getLine(cursor.line - 1).length;
+                cursor.line--;
             } else {
                 break;
             }
@@ -131,14 +132,19 @@ define(function (require, exports, module) {
             context         = null,
             cursor          = this.getCursor(),
             token           = this.getCurrentToken(),
-            prevToken       = this._getPreviousToken(cursor, token);
+            prevToken       = this._getPreviousToken(cursor),
+            prevPrevToken       = this._getPreviousToken(cursor);
 
-        if (token) {
+        if (prevToken && prevToken.string === ".") {
+            propertyLookup = true;
+            context = prevPrevToken.string;
+        } else if (token) {
+            
             if (token.className === "property") {
                 propertyLookup = true;
                 if (prevToken.string === ".") {
                     token = prevToken;
-                    prevToken = this._getPreviousToken(cursor, prevToken);
+                    prevToken = prevPrevToken;
                 }
             }
 
