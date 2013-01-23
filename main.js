@@ -32,37 +32,21 @@ define(function (require, exports, module) {
         AppInit                 = brackets.getModule("utils/AppInit"),
         HintUtils               = require("HintUtils"),
         ScopeManager            = require("ScopeManager"),
-        Scope                   = require("Scope").Scope;
+        Session                 = require("Session").Session;
 
-    var $deferredHints      = null,  // deferred hint object
-        $deferredScope      = null,  // deferred scope object
-        sessionEditor       = null,  // editor object for the current hinting session
-        sessionHints        = null,  // sorted hints for the current hinting session
-        sessionType         = null,  // describes the lookup type and the object context
-        innerScope          = null,  // the inner-most scope returned by the query worker
-        scopedIdentifiers   = null,  // identifiers for the current inner scope
-        scopedProperties    = null,  // properties for the current inner scope
-        scopedAssociations  = null;  // associations for the current inner scope
+    var session             = null,
+        cachedHints         = null,  // sorted hints for the current hinting session
+        cachedType          = null,  // describes the lookup type and the object context
+        cachedScope         = null,  // the inner-most scope returned by the query worker
+        $deferredHints      = null,  // deferred hint object
+        $deferredScope      = null;  // deferred scope object
 
-    /**
-     * Calculate a query string relative to the current cursor position
-     * and token.
-     */
-    function getQuery(cursor, token) {
-        var query = "";
-        if (token) {
-            if (token.string !== ".") {
-                query = token.string.substring(0, token.string.length - (token.end - cursor.ch));
-            }
-        }
-        return query.trim();
-    }
     
     /**
      * Creates a hint response object
      */
     function getResponse(hints, query) {
-        
+
         /*
          * Filter a list of tokens using a given query string
          */
@@ -119,232 +103,6 @@ define(function (require, exports, module) {
             selectInitial: true
         };
     }
-                             
-    function getSessionType(getToken, cursor, token) {
-                
-        /*
-         * Get the token before the one at the given cursor
-         */
-        function getPreviousToken(cursor, token) {
-            var doc     = sessionEditor.document,
-                prev    = token;
-
-            do {
-                if (prev.start < cursor.ch) {
-                    cursor = {ch: prev.start, line: cursor.line};
-                } else if (prev.start > 0) {
-                    cursor = {ch: prev.start - 1, line: cursor.line};
-                } else if (cursor.line > 0) {
-                    cursor = {ch: doc.getLine(cursor.line - 1).length - 1,
-                              line: cursor.line - 1};
-                } else {
-                    break;
-                }
-                prev = getToken(cursor);
-            } while (prev.string.trim() === "");
-            
-            return prev;
-        }
-                
-        var propertyLookup  = false,
-            context         = null,
-            prevToken       = getPreviousToken(cursor, token);
-                
-        if (token) {
-            if (token.className === "property") {
-                propertyLookup = true;
-                if (prevToken.string === ".") {
-                    token = prevToken;
-                    prevToken = getPreviousToken(cursor, prevToken);
-                }
-            }
-
-            if (token.string === ".") {
-                propertyLookup = true;
-                if (prevToken && HintUtils.hintable(prevToken)) {
-                    context = prevToken.string;
-                }
-            }
-        }
-                
-        return {
-            property: propertyLookup,
-            context: context
-        };
-    }
-                             
-    function getSessionHints(path, offset, type) {
-
-        /*
-         * Comparator for sorting tokens according to minimum distance from
-         * a given position
-         */
-        function compareByPosition(pos) {
-            function mindist(pos, t) {
-                var dist = t.positions.length ? Math.abs(t.positions[0] - pos) : Infinity,
-                    i,
-                    tmp;
-
-                for (i = 1; i < t.positions.length; i++) {
-                    tmp = Math.abs(t.positions[i] - pos);
-                    if (tmp < dist) {
-                        dist = tmp;
-                    }
-                }
-                return dist;
-            }
-
-            return function (a, b) {
-                var adist = mindist(pos, a),
-                    bdist = mindist(pos, b);
-                
-                if (adist === Infinity) {
-                    if (bdist === Infinity) {
-                        return 0;
-                    } else {
-                        return 1;
-                    }
-                } else {
-                    if (bdist === Infinity) {
-                        return -1;
-                    } else {
-                        return adist - bdist;
-                    }
-                }
-            };
-        }
-
-        /*
-         * Comparator for sorting tokens lexicographically according to scope
-         * and then minimum distance from a given position
-         */
-        function compareByScope(scope) {
-            return function (a, b) {
-                var adepth = scope.contains(a.value);
-                var bdepth = scope.contains(b.value);
-
-                if (adepth >= 0) {
-                    if (bdepth >= 0) {
-                        return adepth - bdepth;
-                    } else {
-                        return -1;
-                    }
-                } else {
-                    if (bdepth >= 0) {
-                        return 1;
-                    } else {
-                        return 0;
-                    }
-                }
-            };
-        }
-        
-        /*
-         * Comparator for sorting tokens by name
-         */
-        function compareByName(a, b) {
-            if (a.value === b.value) {
-                return 0;
-            } else if (a.value < b.value) {
-                return -1;
-            } else {
-                return 1;
-            }
-        }
-        
-        /*
-         * Comparator for sorting tokens by path, such that
-         * a <= b if a.path === path
-         */
-        function compareByPath(path) {
-            return function (a, b) {
-                if (a.path === path) {
-                    if (b.path === path) {
-                        return 0;
-                    } else {
-                        return -1;
-                    }
-                } else {
-                    if (b.path === path) {
-                        return 1;
-                    } else {
-                        return 0;
-                    }
-                }
-            };
-        }
-        
-        /*
-         * Comparator for sorting properties w.r.t. an association object.
-         */
-        function compareByAssociation(assoc) {
-            return function (a, b) {
-                if (Object.prototype.hasOwnProperty.call(assoc, a.value)) {
-                    if (Object.prototype.hasOwnProperty.call(assoc, b.value)) {
-                        return assoc[a.value] - assoc[b.value];
-                    } else {
-                        return -1;
-                    }
-                } else {
-                    if (Object.prototype.hasOwnProperty.call(assoc, b.value)) {
-                        return 1;
-                    } else {
-                        return 0;
-                    }
-                }
-            };
-        }
-
-        /*
-         * Forms the lexicographical composition of comparators
-         */
-        function lexicographic(compare1, compare2) {
-            return function (a, b) {
-                var result = compare1(a, b);
-                if (result === 0) {
-                    return compare2(a, b);
-                } else {
-                    return result;
-                }
-            };
-        }
-
-        /*
-         * A comparator for identifiers
-         */
-        function compareIdentifiers(scope, pos) {
-            return lexicographic(compareByScope(scope),
-                        lexicographic(compareByPosition(pos),
-                            compareByName));
-        }
-        
-        /*
-         * A comparator for properties
-         */
-        function compareProperties(assoc, path, pos) {
-            return lexicographic(compareByAssociation(assoc),
-                        lexicographic(compareByPath(path),
-                            lexicographic(compareByPosition(pos),
-                                compareByName)));
-        }
-
-        var hints;
-
-        if (type.property) {
-            hints = scopedProperties.slice(0);
-            if (type.context &&
-                    Object.prototype.hasOwnProperty.call(scopedAssociations, type.context)) {
-                hints.sort(compareProperties(scopedAssociations[type.context], path, offset));
-            } else {
-                hints.sort(compareProperties({}, path, offset));
-            }
-        } else {
-            hints = scopedIdentifiers.slice(0);
-            hints.sort(compareIdentifiers(innerScope, offset));
-        }
-        
-        return hints;
-    }
                 
     /**
      * @constructor
@@ -358,56 +116,42 @@ define(function (require, exports, module) {
     JSHints.prototype.hasHints = function (editor, key) {
         
         function handleScope(scopeInfo) {
-            var cm      = sessionEditor._codeMirror,
-                cursor  = sessionEditor.getCursorPos(),
-                offset  = sessionEditor.indexFromPos(cursor),
-                token   = cm.getTokenAt(cursor),
-                type    = getSessionType(cm.getTokenAt, cursor, token),
-                query   = getQuery(cursor, token),
-                path    = sessionEditor.document.file.fullPath,
+            var query   = session.getQuery(),
                 response;
     
-            innerScope = scopeInfo.scope;
-            scopedIdentifiers = scopeInfo.identifiers;
-            scopedProperties = scopeInfo.properties;
-            scopedAssociations = scopeInfo.associations;
-            sessionType = type;
-            sessionHints = getSessionHints(path, offset, sessionType);
+            session.setScopeInfo(scopeInfo);
+            cachedScope = scopeInfo.scope;
+            cachedType = session.getType();
+            cachedHints = session.getHints();
             
             if ($deferredHints && $deferredHints.state() === "pending") {
-                response = getResponse(sessionHints, query);
+                response = getResponse(cachedHints, query);
                 $deferredHints.resolveWith(null, [response]);
             }
         }
         
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
-            var cursor      = editor.getCursorPos(),
-                cm          = editor._codeMirror,
-                token       = cm.getTokenAt(cursor);
+            var token = session.getCurrentToken();
 
             // don't autocomplete within strings or comments, etc.
             if (token && HintUtils.hintable(token)) {
-                var path        = sessionEditor.document.file.fullPath,
-                    offset      = editor.indexFromPos(cursor),
+                var path        = session.getPath(),
+                    offset      = session.getOffset(),
                     scopeInfo;
                 
-                if (!innerScope || ScopeManager.isScopeDirty(path, offset, innerScope)) {
+                if (!cachedScope || ScopeManager.isScopeDirty(path, offset, cachedScope) ||
+                        !cachedScope.containsPositionImmediate(offset)) {
                     scopeInfo = ScopeManager.getScope(path, offset);
-                    sessionHints = null;
+                    cachedHints = null;
                     if (scopeInfo.hasOwnProperty("deferred")) {
-                        innerScope = null;
-                        scopedIdentifiers = null;
-                        scopedProperties = null;
-                        scopedAssociations = null;
+                        cachedScope = null;
                         
                         $deferredScope = scopeInfo.deferred;
                         $deferredScope.done(handleScope);
                     } else {
-                        innerScope = scopeInfo.scope;
-                        scopedIdentifiers = scopeInfo.identifiers;
-                        scopedProperties = scopeInfo.properties;
-                        scopedAssociations = scopeInfo.associations;
-
+                        cachedScope = scopeInfo.scope;
+                        session.setScopeInfo(scopeInfo);
+                        
                         if ($deferredScope && $deferredScope.state() === "pending") {
                             $deferredScope.reject();
                         }
@@ -428,24 +172,21 @@ define(function (require, exports, module) {
     JSHints.prototype.getHints = function (key) {
         
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
-            var cursor  = sessionEditor.getCursorPos(),
-                offset  = sessionEditor.indexFromPos(cursor),
-                cm      = sessionEditor._codeMirror,
-                token   = cm.getTokenAt(cursor);
+            var token = session.getCurrentToken();
 
             if (token && HintUtils.hintable(token)) {
                 
-                if (innerScope) {
-                    var type    = getSessionType(cm.getTokenAt, cursor, token),
-                        query   = getQuery(cursor, token),
-                        path    = sessionEditor.document.file.fullPath;
-                    if (!sessionHints ||
-                            type.property !== sessionType.property ||
-                            type.context !== sessionType.context) {
-                        sessionType = type;
-                        sessionHints = getSessionHints(path, offset, sessionType);
+                if (cachedScope) {
+                    var type    = session.getType(),
+                        query   = session.getQuery();
+
+                    if (!cachedHints ||
+                            type.property !== cachedType.property ||
+                            type.context !== cachedType.context) {
+                        cachedType = type;
+                        cachedHints = session.getHints();
                     }
-                    return getResponse(sessionHints, query);
+                    return getResponse(cachedHints, query);
                 } else if ($deferredScope && $deferredScope.state() === "pending") {
                     if (!$deferredHints || $deferredHints.isRejected()) {
                         $deferredHints = $.Deferred();
@@ -465,28 +206,10 @@ define(function (require, exports, module) {
      */
     JSHints.prototype.insertHint = function (hint) {
 
-        /*
-         * Get the token after the one at the given cursor
-         */
-        function getNextToken(getToken, cursor) {
-            var doc = sessionEditor.document,
-                line = doc.getLine(cursor.line);
-
-            if (cursor.ch < line.length) {
-                return getToken({ch: cursor.ch + 1,
-                                      line: cursor.line});
-            } else if (doc.getLine(cursor.line + 1)) {
-                return getToken({ch: 0, line: cursor.line + 1});
-            } else {
-                return null;
-            }
-        }
-
         var completion  = hint.data('hint'),
-            cm          = sessionEditor._codeMirror,
-            cursor      = sessionEditor.getCursorPos(),
-            token       = cm.getTokenAt(cursor),
-            nextToken   = getNextToken(cm.getTokenAt, cursor),
+            cursor      = session.getCursor(),
+            token       = session.getCurrentToken(),
+            nextToken   = session.getNextToken(),
             start       = {line: cursor.line, ch: token.start},
             end         = {line: cursor.line, ch: token.end};
 
@@ -500,30 +223,34 @@ define(function (require, exports, module) {
             }
         }
 
-        cm.replaceRange(completion, start, end);
+        session.editor._codeMirror.replaceRange(completion, start, end);
         return false;
     };
 
 
     // load the extension
     AppInit.appReady(function () {
-        
+
         /**
          * Reset and recompute the scope and hinting information for the given
          * editor
          */
         function refreshEditor(editor) {
             ScopeManager.handleEditorChange(editor.document.file.fullPath);
-            sessionEditor = editor;
-            scopedIdentifiers = null;
-            scopedProperties = null;
-            scopedAssociations = null;
-            innerScope = null;
+            session = new Session(editor);
+            cachedScope = null;
+            cachedHints = null;
+            cachedType = null;
             
             if ($deferredHints && $deferredHints.state() === "pending") {
                 $deferredHints.reject();
             }
             $deferredHints = null;
+            
+            if ($deferredScope && $deferredScope.state() === "pending") {
+                $deferredScope.reject();
+            }
+            $deferredScope = null;
         }
 
         /*
@@ -533,7 +260,7 @@ define(function (require, exports, module) {
             if (!editor) {
                 return;
             }
-            
+
             var path = editor.document.file.fullPath;
 
             if (editor.getModeForSelection() === HintUtils.MODE_NAME) {
