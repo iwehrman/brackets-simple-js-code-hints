@@ -41,7 +41,6 @@ define(function (require, exports, module) {
         $deferredHints      = null,  // deferred hint object
         $deferredScope      = null;  // deferred scope object
 
-    
     /**
      * Creates a hint response object
      */
@@ -226,7 +225,9 @@ define(function (require, exports, module) {
             end         = {line: cursor.line, ch: token.end};
 
         if (token.string === "." || token.string.trim() === "") {
-            if (nextToken.string.trim() === "" || !HintUtils.hintable(nextToken)) {
+            if (nextToken && (nextToken.string.trim() === "" ||
+                              !HintUtils.hintable(nextToken) ||
+                              HintUtils.maybeIdentifier(nextToken))) {
                 start.ch = cursor.ch;
                 end.ch = cursor.ch;
             } else {
@@ -276,12 +277,11 @@ define(function (require, exports, module) {
             var path = editor.document.file.fullPath;
 
             if (editor.getModeForSelection() === HintUtils.MODE_NAME) {
+                refreshEditor(editor);
                 $(editor)
                     .on(HintUtils.eventName("change"), function () {
                         ScopeManager.handleFileChange(path);
                     });
-
-                refreshEditor(editor);
             }
         }
 
