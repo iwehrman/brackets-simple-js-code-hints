@@ -83,6 +83,30 @@ define(function (require, exports, module) {
     };
     
     /**
+     * Get the token before the one at the given cursor
+     */
+    Session.prototype._getPreviousToken = function (cursor, token) {
+        var doc     = this.editor.document,
+            prev    = token;
+
+        do {
+            if (prev.start < cursor.ch) {
+                cursor = {ch: prev.start, line: cursor.line};
+            } else if (prev.start > 0) {
+                cursor = {ch: prev.start - 1, line: cursor.line};
+            } else if (cursor.line > 0) {
+                cursor = {ch: doc.getLine(cursor.line - 1).length - 1,
+                          line: cursor.line - 1};
+            } else {
+                break;
+            }
+            prev = this.editor._codeMirror.getTokenAt(cursor);
+        } while (prev.string.trim() === "");
+        
+        return prev;
+    };
+    
+    /**
      * Calculate a query string relative to the current cursor position
      * and token.
      */
@@ -102,44 +126,18 @@ define(function (require, exports, module) {
     
     Session.prototype.getType = function () {
 
-        var self = this;
-        
-        /*
-         * Get the token before the one at the given cursor
-         */
-        function getPreviousToken(cursor, token) {
-            var doc     = self.editor.document,
-                prev    = token;
-
-            do {
-                if (prev.start < cursor.ch) {
-                    cursor = {ch: prev.start, line: cursor.line};
-                } else if (prev.start > 0) {
-                    cursor = {ch: prev.start - 1, line: cursor.line};
-                } else if (cursor.line > 0) {
-                    cursor = {ch: doc.getLine(cursor.line - 1).length - 1,
-                              line: cursor.line - 1};
-                } else {
-                    break;
-                }
-                prev = self.editor._codeMirror.getTokenAt(cursor);
-            } while (prev.string.trim() === "");
-            
-            return prev;
-        }
-                
         var propertyLookup  = false,
             context         = null,
-            cursor          = this.editor.getCursorPos(),
-            token           = this.editor._codeMirror.getTokenAt(cursor),
-            prevToken       = getPreviousToken(cursor, token);
+            cursor          = this.getCursor(),
+            token           = this.getCurrentToken(),
+            prevToken       = this._getPreviousToken(cursor, token);
 
         if (token) {
             if (token.className === "property") {
                 propertyLookup = true;
                 if (prevToken.string === ".") {
                     token = prevToken;
-                    prevToken = getPreviousToken(cursor, prevToken);
+                    prevToken = this._getPreviousToken(cursor, prevToken);
                 }
             }
 

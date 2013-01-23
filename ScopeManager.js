@@ -450,6 +450,5 @@ define(function (require, exports, module) {
     exports.handleFileChange = handleFileChange;
     exports.getScope = getScope;
     exports.isScopeDirty = isScopeDirty;
-    
 
 });
