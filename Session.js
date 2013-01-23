@@ -351,6 +351,20 @@ define(function (require, exports, module) {
             });
         }
         
+        function copyHints(hints) {
+            function cloneToken(token) {
+                var copy = {},
+                    prop;
+                for (prop in token) {
+                    if (Object.prototype.hasOwnProperty.call(token, prop)) {
+                        copy[prop] = token[prop];
+                    }
+                }
+                return copy;
+            }
+            return hints.map(cloneToken);
+        }
+
         var cursor = this.editor.getCursorPos(),
             offset = this.editor.indexFromPos(cursor),
             type = this.getType(),
@@ -358,7 +372,7 @@ define(function (require, exports, module) {
             hints;
 
         if (type.property) {
-            hints = this.properties.slice(0);
+            hints = copyHints(this.properties);
             if (type.context &&
                     Object.prototype.hasOwnProperty.call(this.associations, type.context)) {
                 association = this.associations[type.context];
@@ -368,9 +382,9 @@ define(function (require, exports, module) {
                 hints.sort(compareProperties({}, this.path, offset));
             }
         } else {
-            hints = this.identifiers.slice(0);
+            hints = copyHints(this.identifiers);
             hints.sort(compareIdentifiers(this.scope, offset));
-            hints = hints.concat(annotateGlobals(this.globals.slice(0)));
+            hints = hints.concat(annotateGlobals(this.globals));
             hints = hints.concat(annotateKeywords(HintUtils.KEYWORDS));
             hints = annotateIdentifers(hints, this.scope);
         }
