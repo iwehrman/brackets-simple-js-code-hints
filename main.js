@@ -105,7 +105,7 @@ define(function (require, exports, module) {
             });
         }
         
-        var filteredHints   = filterWithQuery(hints.slice(0), query).slice(0, 100),
+        var filteredHints   = filterWithQuery(hints, query).slice(0, 100),
             formattedHints  = formatHints(filteredHints, query);
             
         return {
