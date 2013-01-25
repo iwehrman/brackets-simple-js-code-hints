@@ -32,7 +32,8 @@ define(function (require, exports, module) {
         AppInit                 = brackets.getModule("utils/AppInit"),
         HintUtils               = require("HintUtils"),
         ScopeManager            = require("ScopeManager"),
-        Session                 = require("Session").Session;
+        Session                 = require("Session").Session,
+        usage                   = require("usage");
 
     var session             = null,  // object that encapsulates the current session state
         cachedHints         = null,  // sorted hints for the current hinting session
@@ -141,6 +142,8 @@ define(function (require, exports, module) {
             }
         }
         
+        $(this).triggerHandler("hasHints");
+        
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var token = session.getCurrentToken();
 
@@ -149,6 +152,8 @@ define(function (require, exports, module) {
                 var path        = session.getPath(),
                     offset      = session.getOffset(),
                     scopeInfo;
+                
+                $(this).triggerHandler("beginHintSession", [key]);
                 
                 if (!cachedScope || ScopeManager.isScopeDirty(path, offset, cachedScope) ||
                         !cachedScope.containsPositionImmediate(offset)) {
@@ -181,7 +186,6 @@ define(function (require, exports, module) {
       * context
       */
     JSHints.prototype.getHints = function (key) {
-        
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var token = session.getCurrentToken();
 
@@ -196,17 +200,22 @@ define(function (require, exports, module) {
                             type.context !== cachedType.context) {
                         cachedType = type;
                         cachedHints = session.getHints();
+                        $(this).triggerHandler("refreshHints", [key, cachedHints, cachedType]);
                     }
+                    
+                    $(this).triggerHandler("hintResponse", [query]);
                     return getResponse(cachedHints, query);
                 } else if ($deferredScope && $deferredScope.state() === "pending") {
                     if (!$deferredHints || $deferredHints.isRejected()) {
                         $deferredHints = $.Deferred();
                     }
+                    $(this).triggerHandler("deferredResponse");
                     return $deferredHints;
                 }
             }
         }
 
+        $(this).triggerHandler("nullResponse");
         return null;
     };
 
@@ -224,6 +233,8 @@ define(function (require, exports, module) {
             start       = {line: cursor.line, ch: token.start},
             end         = {line: cursor.line, ch: token.end};
 
+        $(this).triggerHandler("insertHint", [completion]);
+        
         if (token.string === "." || token.string.trim() === "") {
             if (nextToken && (nextToken.string.trim() === "" ||
                               !HintUtils.hintable(nextToken) ||
@@ -306,6 +317,8 @@ define(function (require, exports, module) {
 
         var jsHints = new JSHints();
         CodeHintManager.registerHintProvider(jsHints, [HintUtils.MODE_NAME], 0);
+            
+        usage.listen(jsHints);
 
         // for unit testing
         exports.jsHintProvider = jsHints;
