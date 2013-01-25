@@ -38,10 +38,7 @@ define(function (require, exports, module) {
     function listen(obj) {
 
         function save(obj) {
-
             var response = JSON.stringify(obj);
-            console.log("Response: " + response);
-            
             $.ajax({
                 type    : "POST",
                 url     : SERVER_URL,
@@ -50,10 +47,6 @@ define(function (require, exports, module) {
                 console.log("Error: " + msg);
             });
         }
-
-        Array.prototype.last = function () {
-            return this[this.length - 1];
-        };
 
         var session         = null,
             keystrokes      = 0,
@@ -132,7 +125,6 @@ define(function (require, exports, module) {
                 session.succeeded = false;
                 session.finished = true;
                 endSession(hints);
-
                 session = makeSession(key);
             }
     
