@@ -31,7 +31,7 @@ define(function (require, exports, module) {
     
     require("Math.uuid");
     
-    var SERVER_URL      = "http://localhost:8080/a",
+    var SERVER_URL      = "http://js-hints.wehrman.org:8080/a",
         PREFERENCES_KEY = "brackets-js-hints",
         CLIENT_ID_KEY   = "client-id";
 
