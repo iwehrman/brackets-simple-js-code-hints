@@ -50,7 +50,6 @@ define(function (require, exports, module) {
 
         var session         = null,
             keystrokes      = 0,
-            sessioncount    = 0,
             hints           = null,
             type            = null,
             prefs           = PreferencesManager.getPreferenceStorage(PREFERENCES_KEY),
@@ -64,9 +63,8 @@ define(function (require, exports, module) {
         function makeSession(key) {
             return {
                 userid       : userId,
-                sessioncount : sessioncount++,
                 keycount     : keystrokes,
-                startkey     : key,
+                implicit     : !!key,
                 property     : undefined,
                 finished     : false,
                 succeeded    : undefined,
@@ -105,6 +103,7 @@ define(function (require, exports, module) {
             
             save(session);
             session = null;
+            keystrokes = 0;
         }
 
         $(obj).on("hasHints", function (event) {
