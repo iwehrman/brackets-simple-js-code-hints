@@ -96,6 +96,12 @@ define(function (require, exports, module) {
                     break;
                 }
                 
+                switch (token.literal) {
+                case true:
+                    $hintObj.css('color', 'rgb(100,100,100)');
+                    break;
+                }
+                
                 switch (token.keyword) {
                 case true:
                     $hintObj.css('font-family', 'monospace');
