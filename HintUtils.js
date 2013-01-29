@@ -87,6 +87,10 @@ define(function (require, exports, module) {
         "new", "return", "switch", "this", "throw", "try", "typeof", "var",
         "void", "while", "with"
     ].map(function (t) { return makeToken(t, []); });
+    
+    var LITERALS = [
+        "true", "false", "null", "undefined"
+    ].map(function (t) { return makeToken(t, []); });
 
     var JSL_GLOBALS = [
         "clearInterval", "clearTimeout", "document", "event", "frames",
@@ -196,6 +200,7 @@ define(function (require, exports, module) {
     exports.eventName       = eventName;
     exports.JSL_GLOBAL_DEFS = JSL_GLOBAL_DEFS;
     exports.KEYWORDS        = KEYWORDS;
+    exports.LITERALS        = LITERALS;
     exports.MODE_NAME       = MODE_NAME;
     exports.SCOPE_MSG_TYPE  = SCOPE_MSG_TYPE;
 });

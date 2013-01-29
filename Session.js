@@ -344,6 +344,13 @@ define(function (require, exports, module) {
             });
         }
         
+        function annotateLiterals(literals) {
+            return literals.map(function (t) {
+                t.literal = true;
+                return t;
+            });
+        }
+        
         function annotateKeywords(keywords) {
             return keywords.map(function (t) {
                 t.keyword = true;
@@ -385,6 +392,7 @@ define(function (require, exports, module) {
             hints = copyHints(this.identifiers);
             hints.sort(compareIdentifiers(this.scope, offset));
             hints = hints.concat(annotateGlobals(this.globals));
+            hints = hints.concat(annotateLiterals(HintUtils.LITERALS));
             hints = hints.concat(annotateKeywords(HintUtils.KEYWORDS));
             hints = annotateIdentifers(hints, this.scope);
         }
