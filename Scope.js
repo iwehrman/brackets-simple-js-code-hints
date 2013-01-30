@@ -276,10 +276,15 @@ define(function (require, exports, module) {
                 parent.addIdOccurrence(tree);
                 break;
 
+            case "Literal":
+                if (tree.value && typeof tree.value === "string") {
+                    parent.addLiteralOccurrence(tree);
+                }
+                break;
+                    
             case "DebuggerStatement":
             case "EmptyStatement":
             case "ThisExpression":
-            case "Literal":
                 break;
 
             default:
@@ -294,6 +299,7 @@ define(function (require, exports, module) {
             scope.idOccurrences = data.idOccurrences;
             scope.propOccurrences = data.propOccurrences;
             scope.associations = data.associations;
+            scope.literals = data.literals;
             scope.children = [];
 
             for (i = 0; i < data.children.length; i++) {
@@ -317,6 +323,7 @@ define(function (require, exports, module) {
             this.idOccurrences = [];
             this.propOccurrences = [];
             this.associations = [];
+            this.literals = [];
 
             this.children = []; // disjoint ranges, ordered by range start
             this.range = { start: obj.range[0], end: obj.range[1] };
@@ -350,6 +357,10 @@ define(function (require, exports, module) {
 
     Scope.prototype.addAssociation = function (obj, prop) {
         this.associations.push({object: obj, property: prop});
+    };
+    
+    Scope.prototype.addLiteralOccurrence = function (lit) {
+        this.literals.push(lit);
     };
 
     Scope.prototype.addChildScope = function (child) {
@@ -466,6 +477,10 @@ define(function (require, exports, module) {
 
     Scope.prototype.walkDownAssociations = function (add, init) {
         return this.walkDownList(add, init, 'associations');
+    };
+
+    Scope.prototype.walkDownLiterals = function (add, init) {
+        return this.walkDownList(add, init, 'literals');
     };
     
     /**

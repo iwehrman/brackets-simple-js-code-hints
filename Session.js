@@ -40,6 +40,7 @@ define(function (require, exports, module) {
         this.identifiers = scopeInfo.identifiers;
         this.globals = scopeInfo.globals;
         this.properties = scopeInfo.properties;
+        this.literals = scopeInfo.literals;
         this.associations = scopeInfo.associations;
     };
 
@@ -204,13 +205,13 @@ define(function (require, exports, module) {
         }
 
         /*
-         * Comparator for sorting tokens lexicographically according to scope
-         * and then minimum distance from a given position
+         * Comparator for sorting tokens lexicographically according to scope,
+         * assuming the scope level has already been annotated.
          */
-        function compareByScope(scope) {
+        function compareByScope() {
             return function (a, b) {
-                var adepth = scope.contains(a.value);
-                var bdepth = scope.contains(b.value);
+                var adepth = a.level;
+                var bdepth = b.level;
 
                 if (adepth >= 0) {
                     if (bdepth >= 0) {
@@ -301,8 +302,8 @@ define(function (require, exports, module) {
         /*
          * A comparator for identifiers
          */
-        function compareIdentifiers(scope, pos) {
-            return lexicographic(compareByScope(scope),
+        function compareIdentifiers(pos) {
+            return lexicographic(compareByScope(),
                         lexicographic(compareByPosition(pos),
                             compareByName));
         }
@@ -323,6 +324,8 @@ define(function (require, exports, module) {
                 
                 if (level >= 0) {
                     t.level = level;
+                } else {
+                    t.level = -1;
                 }
                 return t;
             });
@@ -344,9 +347,19 @@ define(function (require, exports, module) {
             });
         }
         
-        function annotateLiterals(literals) {
+        function annotateLiterals(literals, kind) {
             return literals.map(function (t) {
                 t.literal = true;
+                t.kind = kind;
+                if (t.value.indexOf(HintUtils.DOUBLE_QUOTE) > 0) {
+                    if (t.value.indexOf(HintUtils.SINGLE_QUOTE) > 0) {
+                        t.delimeter = HintUtils.DOUBLE_QUOTE;
+                    } else {
+                        t.delimeter = HintUtils.SINGLE_QUOTE;
+                    }
+                } else {
+                    t.delimeter = HintUtils.DOUBLE_QUOTE;
+                }
                 return t;
             });
         }
@@ -389,12 +402,12 @@ define(function (require, exports, module) {
                 hints.sort(compareProperties({}, this.path, offset));
             }
         } else {
-            hints = copyHints(this.identifiers);
-            hints.sort(compareIdentifiers(this.scope, offset));
+            hints = annotateIdentifers(copyHints(this.identifiers), this.scope);
+            hints = hints.concat(annotateLiterals(copyHints(this.literals), "string"));
+            hints.sort(compareIdentifiers(offset));
             hints = hints.concat(annotateGlobals(this.globals));
             hints = hints.concat(annotateLiterals(HintUtils.LITERALS));
             hints = hints.concat(annotateKeywords(HintUtils.KEYWORDS));
-            hints = annotateIdentifers(hints, this.scope);
         }
         
         return hints;
