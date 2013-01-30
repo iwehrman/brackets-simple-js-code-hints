@@ -142,9 +142,10 @@ define(function (require, exports, module) {
         if (token) {
             if (token.string !== ".") {
                 query = token.string.substring(0, token.string.length - (token.end - cursor.ch));
+                query = query.trim();
             }
         }
-        return query.trim();
+        return query;
     };
     
     /**
