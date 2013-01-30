@@ -301,47 +301,33 @@ define(function (require, exports, module) {
             completion  = hint.value,
             cursor      = session.getCursor(),
             token       = session.getCurrentToken(),
-            nextToken   = session.getNextToken(),
-            start       = {line: cursor.line, ch: token.start},
-            end         = {line: cursor.line, ch: token.end},
+            query       = session.getQuery(),
+            start       = {line: cursor.line, ch: cursor.ch - query.length},
+            end         = {line: cursor.line, ch: (token ? token.end : cursor.ch)},
             delimeter;
 
         $(this).triggerHandler("insertHint", [completion]);
 
-        if (token) {
-            
-            // If the hint is a string literal, choose a delimiter in which
-            // to wrap it, preserving the existing delimiter if possible.
-            if (hint.literal && hint.kind === "string") {
-                if (token.string.indexOf(HintUtils.DOUBLE_QUOTE) === 0) {
-                    delimeter = HintUtils.DOUBLE_QUOTE;
-                } else if (token.string.indexOf(HintUtils.SINGLE_QUOTE) === 0) {
-                    delimeter = HintUtils.SINGLE_QUOTE;
-                } else {
-                    delimeter = hint.delimeter;
-                }
-
-                completion = delimeter +
-                    completion.replace(delimeter, "\\" + delimeter) +
-                    delimeter;
+        // If the hint is a string literal, choose a delimiter in which
+        // to wrap it, preserving the existing delimiter if possible.
+        if (hint.literal && hint.kind === "string") {
+            if (token.string.indexOf(HintUtils.DOUBLE_QUOTE) === 0) {
+                delimeter = HintUtils.DOUBLE_QUOTE;
+            } else if (token.string.indexOf(HintUtils.SINGLE_QUOTE) === 0) {
+                delimeter = HintUtils.SINGLE_QUOTE;
+            } else {
+                delimeter = hint.delimeter;
             }
 
-            // Calculate the bounds of the token to be replaced by the completion
-            if (token.string === "." || token.string.trim() === "") {
-                if (nextToken && (nextToken.string.trim() === "" ||
-                                  !HintUtils.hintable(nextToken) ||
-                                  HintUtils.maybeIdentifier(nextToken))) {
-                    start.ch = cursor.ch;
-                    end.ch = cursor.ch;
-                } else {
-                    start.ch = nextToken.start;
-                    end.ch = nextToken.end;
-                }
-            }
-
-            // Replace the current token with the completion
-            session.editor._codeMirror.replaceRange(completion, start, end);
+            completion = delimeter +
+                completion.replace(delimeter, "\\" + delimeter) +
+                delimeter;
         }
+
+        // Replace the current token with the completion
+        session.editor._codeMirror.replaceRange(completion, start, end);
+
+        // Return false to indicate that another hinting session is not needed
         return false;
     };
 
