@@ -161,7 +161,7 @@ define(function (require, exports, module) {
 
         return {
             hints: formattedHints,
-            match: null,
+            match: null, // the CodeHintManager should not format the results
             selectInitial: true
         };
     }
@@ -177,6 +177,9 @@ define(function (require, exports, module) {
      */
     JSHints.prototype.hasHints = function (editor, key) {
         
+        /*
+         * Resolve deferred hints upon resolution of a deferred scope
+         */
         function handleScope(scopeInfo) {
             var query   = session.getQuery(),
                 response;
@@ -203,15 +206,19 @@ define(function (require, exports, module) {
                     line        = session.getCursor().line,
                     scopeInfo;
                 
-                // get a new scope if: 1) none exists; 2) the cursor has moved
-                // more than a single line; 3) the scope is dirty; or 4) if 
-                // the cursor has moved into a different scope.
+                // Try to get a new scope if: 1) none exists; 2) the cursor has 
+                // moved more than a single line; 3) the scope is dirty; or 4)
+                // if the cursor has moved into a different scope.
                 if (!cachedScope ||
                         Math.abs(line - cachedLine) > 1 ||
                         ScopeManager.isScopeDirty(path, offset, cachedScope) ||
                         !cachedScope.containsPositionImmediate(offset)) {
                     scopeInfo = ScopeManager.getScope(path, offset);
                     cachedHints = null;
+                    
+                    // If the scope is deferred, deferred hints will have to
+                    // be returned as well. Otherwise, update the session with
+                    // the new scope information.
                     if (scopeInfo.hasOwnProperty("deferred")) {
                         cachedScope = null;
                         cachedLine = null;
@@ -223,10 +230,12 @@ define(function (require, exports, module) {
                         cachedLine = session.getCursor().line;
                         session.setScopeInfo(scopeInfo);
                         
-                        if ($deferredScope && $deferredScope.state() === "pending") {
-                            $deferredScope.reject();
+                        if ($deferredScope) {
+                            if ($deferredScope.state() === "pending") {
+                                $deferredScope.reject();
+                            }
+                            $deferredScope = null;
                         }
-                        $deferredScope = null;
                     }
                 }
 
@@ -248,14 +257,20 @@ define(function (require, exports, module) {
                     var type    = session.getType(),
                         query   = session.getQuery();
 
+                    // Compute fresh hints if none exist, or if the session
+                    // type has changed since the last hint computation
                     if (!cachedHints ||
                             type.property !== cachedType.property ||
                             type.context !== cachedType.context) {
                         cachedType = type;
                         cachedHints = session.getHints();
                     }
+                    
                     return getResponse(cachedHints, query);
                 } else if ($deferredScope && $deferredScope.state() === "pending") {
+                    // If there is no cached scope object, we cannot return hints.
+                    // Instead, return a deferred response that will be resolved 
+                    // when a scope is received.
                     if (!$deferredHints || $deferredHints.isRejected()) {
                         $deferredHints = $.Deferred();
                     }
@@ -300,6 +315,7 @@ define(function (require, exports, module) {
                     delimeter;
             }
 
+            // Calculate the bounds of the token to be replaced by the completion
             if (token.string === "." || token.string.trim() === "") {
                 if (nextToken && (nextToken.string.trim() === "" ||
                                   !HintUtils.hintable(nextToken) ||
@@ -312,6 +328,7 @@ define(function (require, exports, module) {
                 }
             }
 
+            // Replace the current token with the completion
             session.editor._codeMirror.replaceRange(completion, start, end);
         }
         return false;
@@ -321,11 +338,11 @@ define(function (require, exports, module) {
     // load the extension
     AppInit.appReady(function () {
 
-        /**
-         * Reset and recompute the scope and hinting information for the given
-         * editor
+        /*
+         * When the editor is changed, reset the hinting session and cached 
+         * information, and reject any pending deferred requests.
          */
-        function refreshEditor(editor) {
+        function handleEditorChange(editor) {
             ScopeManager.handleEditorChange(editor.document.file.fullPath);
             session = new Session(editor);
             cachedScope = null;
@@ -333,19 +350,23 @@ define(function (require, exports, module) {
             cachedHints = null;
             cachedType = null;
             
-            if ($deferredHints && $deferredHints.state() === "pending") {
-                $deferredHints.reject();
+            if ($deferredHints) {
+                if ($deferredHints.state() === "pending") {
+                    $deferredHints.reject();
+                }
+                $deferredHints = null;
             }
-            $deferredHints = null;
             
-            if ($deferredScope && $deferredScope.state() === "pending") {
-                $deferredScope.reject();
+            if ($deferredScope) {
+                if ($deferredScope.state() === "pending") {
+                    $deferredScope.reject();
+                }
+                $deferredScope = null;
             }
-            $deferredScope = null;
         }
 
         /*
-         * Install editor change listeners to keep the outer scope fresh
+         * Install editor change listeners
          */
         function installEditorListeners(editor) {
             if (!editor) {
@@ -355,7 +376,7 @@ define(function (require, exports, module) {
             var path = editor.document.file.fullPath;
 
             if (editor.getModeForSelection() === HintUtils.MODE_NAME) {
-                refreshEditor(editor);
+                handleEditorChange(editor);
                 $(editor)
                     .on(HintUtils.eventName("change"), function () {
                         ScopeManager.handleFileChange(path);

@@ -30,11 +30,18 @@ define(function (require, exports, module) {
     var HintUtils       = require("HintUtils"),
         ScopeManager    = require("ScopeManager");
 
+    /**
+     * Session objects encapsulate state associated with a hinting session
+     * and provide methods for updating and querying the session.
+     */
     function Session(editor) {
         this.editor = editor;
         this.path = editor.document.file.fullPath;
     }
 
+    /**
+     * Update the scope information assocated with the current session
+     */
     Session.prototype.setScopeInfo = function (scopeInfo) {
         this.scope = scopeInfo.scope;
         this.identifiers = scopeInfo.identifiers;
@@ -44,20 +51,34 @@ define(function (require, exports, module) {
         this.associations = scopeInfo.associations;
     };
 
+    /**
+     * Get the name of the file associated with the current session
+     */
     Session.prototype.getPath = function () {
         return this.path;
     };
 
+    /**
+     * Get the current cursor position.
+     *
+     * @return Object<line: number, ch, number>
+     */
     Session.prototype.getCursor = function () {
         return this.editor.getCursorPos();
     };
     
+    /**
+     * Get the offset of the current cursor position
+     */
     Session.prototype.getOffset = function () {
         var cursor = this.getCursor();
         
         return this.editor.indexFromPos(cursor);
     };
     
+    /**
+     * Get the token at the current cursor position
+     */
     Session.prototype.getCurrentToken = function () {
         var cm      = this.editor._codeMirror,
             cursor  = this.getCursor();
@@ -114,9 +135,8 @@ define(function (require, exports, module) {
      * and token.
      */
     Session.prototype.getQuery = function () {
-        var cm      = this.editor._codeMirror,
-            cursor  = this.editor.getCursorPos(),
-            token   = cm.getTokenAt(cursor),
+        var cursor  = this.getCursor(),
+            token   = this.getCurrentToken(),
             query   = "";
         
         if (token) {
@@ -127,8 +147,11 @@ define(function (require, exports, module) {
         return query.trim();
     };
     
+    /**
+     * Get the type of the type of the current session, i.e., whether it is a
+     * property lookup and, if so, what the context of the lookup is. 
+     */
     Session.prototype.getType = function () {
-
         var propertyLookup  = false,
             context         = null,
             cursor          = this.getCursor(),
@@ -162,14 +185,22 @@ define(function (require, exports, module) {
             context: context
         };
     };
-    
-    Session.prototype.getHints = function () {
 
+    /**
+     * Get a list of hints for the current session using the current scope information. 
+     */
+    Session.prototype.getHints = function () {
+        
         /*
          * Comparator for sorting tokens according to minimum distance from
          * a given position
          */
         function compareByPosition(pos) {
+            
+            /*
+             * Compute the minimum distance between a token, with which is 
+             * associated a list of positions, and a given offset
+             */
             function mindist(pos, t) {
                 var dist = t.positions.length ? Math.abs(t.positions[0] - pos) : Infinity,
                     i,
@@ -318,6 +349,9 @@ define(function (require, exports, module) {
                                 compareByName)));
         }
         
+        /*
+         * Annotate list of identifiers with their scope level
+         */
         function annotateIdentifers(identifiers, scope) {
             return identifiers.map(function (t) {
                 var level = scope.contains(t.value);
@@ -331,6 +365,9 @@ define(function (require, exports, module) {
             });
         }
         
+        /*
+         * Annotate a list of properties with their association level
+         */
         function annotateProperties(properties, association) {
             return properties.map(function (t) {
                 if (association[t.value] > 0) {
@@ -340,6 +377,9 @@ define(function (require, exports, module) {
             });
         }
         
+        /*
+         * Annotate a list of tokens as being global variables
+         */
         function annotateGlobals(globals) {
             return globals.map(function (t) {
                 t.global = true;
@@ -347,6 +387,10 @@ define(function (require, exports, module) {
             });
         }
         
+        /*
+         * Annotate a list of tokens as literals of a particular kind;
+         * if string literals, annotate with an appropriate delimiter. 
+         */
         function annotateLiterals(literals, kind) {
             return literals.map(function (t) {
                 t.literal = true;
@@ -364,6 +408,9 @@ define(function (require, exports, module) {
             });
         }
         
+        /* 
+         * Annotate a list of tokens as keywords
+         */
         function annotateKeywords(keywords) {
             return keywords.map(function (t) {
                 t.keyword = true;
@@ -371,6 +418,10 @@ define(function (require, exports, module) {
             });
         }
         
+        /*
+         * Clone a list of hints. (Used so that later annotations are not 
+         * preserved when scope information changes.)
+         */
         function copyHints(hints) {
             function cloneToken(token) {
                 var copy = {},

@@ -63,10 +63,14 @@
         return results;
     }
 
+    /**
+     * Walk the scope to compute all available association objects
+     */
     function siftAssociations(scope) {
         return scope.walkDownAssociations(function (acc, assoc) {
             var obj     = assoc.object,
                 prop    = assoc.property;
+            
             if (Object.prototype.hasOwnProperty.call(acc, obj.name)) {
                 if (Object.prototype.hasOwnProperty.call(acc[obj.name], prop.name)) {
                     acc[obj.name][prop.name]++;
