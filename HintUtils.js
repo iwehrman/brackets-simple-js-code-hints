@@ -43,7 +43,8 @@ define(function (require, exports, module) {
      * Is the string key perhaps a valid JavaScript identifier?
      */
     function maybeIdentifier(key) {
-        return (/[0-9a-z_.\$]/i).test(key);
+        return (/[0-9a-z_.\$]/i).test(key) ||
+            (key.indexOf("\"") === 0) || (key.indexOf("\'") === 0);
     }
 
     /**
@@ -51,7 +52,6 @@ define(function (require, exports, module) {
      */
     function hintable(token) {
         switch (token.className) {
-        case "string":
         case "comment":
         case "number":
         case "regexp":
@@ -61,7 +61,6 @@ define(function (require, exports, module) {
         }
     }
     
-                
     /**
      * Divide a path into directory and filename parts
      */
@@ -190,8 +189,10 @@ define(function (require, exports, module) {
         windows : JSL_GLOBALS_WINDOWS
     };
     
-    var MODE_NAME = "javascript",
-        SCOPE_MSG_TYPE = "outerScope";
+    var MODE_NAME       = "javascript",
+        SCOPE_MSG_TYPE  = "outerScope",
+        SINGLE_QUOTE    = "\'",
+        DOUBLE_QUOTE    = "\"";
 
     exports.makeToken       = makeToken;
     exports.hintable        = hintable;
@@ -203,4 +204,6 @@ define(function (require, exports, module) {
     exports.LITERALS        = LITERALS;
     exports.MODE_NAME       = MODE_NAME;
     exports.SCOPE_MSG_TYPE  = SCOPE_MSG_TYPE;
+    exports.SINGLE_QUOTE    = SINGLE_QUOTE;
+    exports.DOUBLE_QUOTE    = DOUBLE_QUOTE;
 });

@@ -39,6 +39,7 @@ define(function (require, exports, module) {
         allIdentifiers      = {},    // dir -> file -> list of identifiers for the given file
         allGlobals          = {},    // dir -> file -> list of globals for the given file
         allProperties       = {},    // dir -> file -> list of properties for the given file
+        allLiterals         = {},    // dir -> file -> list of literals for the given file
         allAssociations     = {},    // dir -> file -> object-property associations for the given file
         outerScope          = {},    // dir -> file -> outer-most scope for the given file
         outerScopeDirty     = {},    // dir -> file -> has the given file changed since the last outer scope request? 
@@ -76,6 +77,9 @@ define(function (require, exports, module) {
             }
             if (!allProperties.hasOwnProperty(dir)) {
                 allProperties[dir] = {};
+            }
+            if (!allLiterals.hasOwnProperty(dir)) {
+                allLiterals[dir] = {};
             }
             if (!allAssociations.hasOwnProperty(dir)) {
                 allAssociations[dir] = {};
@@ -257,6 +261,7 @@ define(function (require, exports, module) {
                 identifiers: scopedIdentifiers,
                 globals: allGlobals[dir][file],
                 properties: scopedProperties,
+                literals: allLiterals[dir][file],
                 associations: scopedAssociations
             };
         }
@@ -356,6 +361,7 @@ define(function (require, exports, module) {
                     p.path = path;
                     return p;
                 });
+                allLiterals[dir][file] = response.literals;
                 allAssociations[dir][file] = response.associations;
                 innerScopeDirty[dir][file] = true;
 
@@ -398,6 +404,7 @@ define(function (require, exports, module) {
                 allGlobals          = {};
                 allIdentifiers      = {};
                 allProperties       = {};
+                allLiterals         = {};
                 allAssociations     = {};
                 outerScope          = {};
                 outerScopeDirty     = {};
@@ -436,6 +443,7 @@ define(function (require, exports, module) {
                 moveProp(allGlobals);
                 moveProp(allIdentifiers);
                 moveProp(allProperties);
+                moveProp(allLiterals);
                 moveProp(allAssociations);
             });
     

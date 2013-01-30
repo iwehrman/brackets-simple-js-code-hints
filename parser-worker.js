@@ -39,17 +39,17 @@
      * Walk the scope to find all the objects of a given type, along with a
      * list of their positions in the file.
      */
-    function siftPositions(scope, walk) {
+    function siftPositions(scope, walk, keyProp) {
         var occurrences,
             results = [],
             key,
             token;
 
         occurrences = walk.call(scope, function (acc, token) {
-            if (Object.prototype.hasOwnProperty.call(acc, token.name)) {
-                acc[token.name].push(token.range[0]);
+            if (Object.prototype.hasOwnProperty.call(acc, token[keyProp])) {
+                acc[token[keyProp]].push(token.range[0]);
             } else {
-                acc[token.name] = [token.range[0]];
+                acc[token[keyProp]] = [token.range[0]];
             }
             return acc;
         }, {});
@@ -122,12 +122,13 @@
     }
 
     function respond(dir, file, length, parseObj) {
-        var scope = parseObj ? parseObj.scope : null,
-            globals = parseObj ? parseObj.globals : null,
-            identifiers = parseObj ? siftPositions(scope, scope.walkDownIdentifiers) : null,
-            properties = parseObj ? siftPositions(scope, scope.walkDownProperties) : null,
-            associations = parseObj ? siftAssociations(scope, scope.walkDownAssociations) : null,
-            response  = {
+        var scope           = parseObj ? parseObj.scope : null,
+            globals         = parseObj ? parseObj.globals : null,
+            identifiers     = parseObj ? siftPositions(scope, scope.walkDownIdentifiers, "name") : null,
+            properties      = parseObj ? siftPositions(scope, scope.walkDownProperties, "name") : null,
+            literals        = parseObj ? siftPositions(scope, scope.walkDownLiterals, "value") : null,
+            associations    = parseObj ? siftAssociations(scope, scope.walkDownAssociations) : null,
+            response        = {
                 type            : self.SCOPE_MSG_TYPE,
                 dir             : dir,
                 file            : file,
@@ -136,6 +137,7 @@
                 globals         : globals,
                 identifiers     : identifiers,
                 properties      : properties,
+                literals        : literals,
                 associations    : associations,
                 success         : !!parseObj
             };
