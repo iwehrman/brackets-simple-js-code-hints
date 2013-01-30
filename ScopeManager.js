@@ -149,31 +149,26 @@ define(function (require, exports, module) {
         }
         
         /*
-         * Combine all the sets from init[dir] using add
+         * Combine a set of sets using the add operation
          */
-        function merge(dir, file, init, add) {
-            var unique = {},
-                others = init[dir],
-                otherfile;
+        function merge(sets, add) {
+            var combinedSet = {},
+                file;
 
-            add(unique, init[dir][file]);
-
-            for (otherfile in others) {
-                if (others.hasOwnProperty(otherfile)) {
-                    if (otherfile !== file) {
-                        add(unique, others[otherfile]);
-                    }
+            for (file in sets) {
+                if (sets.hasOwnProperty(file)) {
+                    add(combinedSet, sets[file]);
                 }
             }
 
-            return unique;
+            return combinedSet;
         }
 
         /*
          * Combine properties from files in the current file's directory into
          * one sorted list. 
          */
-        function mergeProperties(dir, file) {
+        function mergeProperties(dir) {
             
             function addPropObjs(obj1, obj2) {
                 function addToObj(obj, token) {
@@ -185,7 +180,7 @@ define(function (require, exports, module) {
                 obj2.forEach(function (token) { addToObj(obj1, token); });
             }
             
-            var propobj = merge(dir, file, allProperties, addPropObjs),
+            var propobj = merge(allProperties[dir], addPropObjs),
                 proplist = [],
                 propname;
             
@@ -230,7 +225,7 @@ define(function (require, exports, module) {
                 }
             }
             
-            return merge(dir, file, allAssociations, addAssocSets);
+            return merge(allAssociations[dir], addAssocSets);
         }
         
         // If there is no outer scope, the inner scope request is deferred. 
