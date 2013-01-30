@@ -35,7 +35,7 @@ define(function (require, exports, module) {
         HintUtils               = require("HintUtils"),
         Scope                   = require("Scope").Scope;
 
-    var pendingRequest      = null,
+    var pendingRequest      = null,  // information about a deferred scope request
         allIdentifiers      = {},    // dir -> file -> list of identifiers for the given file
         allGlobals          = {},    // dir -> file -> list of globals for the given file
         allProperties       = {},    // dir -> file -> list of properties for the given file
@@ -55,6 +55,9 @@ define(function (require, exports, module) {
      */
     function refreshOuterScope(dir, file) {
 
+        /* 
+         * Initialize state maps for a given directory name and file name
+         */
         function initializeFile(dir, file) {
             // initialize outerScope, etc. at dir
             if (!outerScope.hasOwnProperty(dir)) {
@@ -106,11 +109,17 @@ define(function (require, exports, module) {
         // we might need to update the outer scope
         if (outerScope[dir][file] === null || outerScopeDirty[dir][file]) {
             if (!outerWorkerActive[dir][file]) {
-                // and maybe if some time has passed without parsing... 
+                // FIXME: we may want to debounce this call
                 var path    = dir + file,
                     entry   = new NativeFileSystem.FileEntry(path);
-                outerWorkerActive[dir][file] = true; // the outer scope worker is active
-                outerScopeDirty[dir][file] = false; // the file is clean since the last outer scope request
+                
+                // the outer scope worker is about to be active
+                outerWorkerActive[dir][file] = true;
+                
+                // the file will be clean since the last outer scope request
+                outerScopeDirty[dir][file] = false;
+                
+                // read the contents of the file, send it to the parser worker
                 FileUtils.readAsText(entry).done(function (text) {
                     outerScopeWorker.postMessage({
                         type        : HintUtils.SCOPE_MSG_TYPE,
@@ -139,6 +148,9 @@ define(function (require, exports, module) {
             });
         }
         
+        /*
+         * Combine all the sets from init[dir] using add
+         */
         function merge(dir, file, init, add) {
             var unique = {},
                 others = init[dir],
@@ -186,6 +198,9 @@ define(function (require, exports, module) {
             return proplist;
         }
         
+        /* 
+         * Combine association objects from multiple files
+         */
         function mergeAssociations(dir, file) {
             function addAssocSets(list1, list2) {
                 var name;
@@ -218,11 +233,14 @@ define(function (require, exports, module) {
             return merge(dir, file, allAssociations, addAssocSets);
         }
         
+        // If there is no outer scope, the inner scope request is deferred. 
         if (!outerScope[dir] || !outerScope[dir][file]) {
+            // Create a new deferred scope response if the existing response is
+            // for a different file or if one doesn't already exist.
             if (!pendingRequest || pendingRequest.dir !== dir || pendingRequest.file !== file) {
                 
                 if (pendingRequest && pendingRequest.deferred.state() === "pending") {
-                    pendingRequest.reject();
+                    pendingRequest.deferred.reject();
                 }
 
                 pendingRequest = {
@@ -232,12 +250,25 @@ define(function (require, exports, module) {
                     deferred    : $.Deferred()
                 };
             }
+            
+            // Request the outer scope from the parser worker.
             refreshOuterScope(dir, file);
             return { deferred: pendingRequest.deferred };
         } else {
-            pendingRequest = null;
+            // Reject any pending requests for scopes. 
+            if (pendingRequest) {
+                if (pendingRequest.deferred && pendingRequest.deferred.state() === "pending") {
+                    pendingRequest.deferred.reject();
+                }
+                pendingRequest = null;
+            }
+            
+            // The inner scope will be clean after this
             innerScopeDirty[dir][file] = false;
+            
+            // Try to find an inner scope from the current outer scope
             var innerScope = outerScope[dir][file].findChild(offset);
+            
             if (!innerScope) {
                 // we may have failed to find a child scope because a 
                 // character was added to the end of the file, outside of
@@ -267,6 +298,10 @@ define(function (require, exports, module) {
         }
     }
     
+    /**
+     * Get a new inner scope, if possible. If there is no outer scope for the
+     * given file, a deferred scope will be returned instead.
+     */
     function getScope(path, offset) {
         var split   = HintUtils.splitPath(path),
             dir     = split.dir,
@@ -275,14 +310,21 @@ define(function (require, exports, module) {
         return refreshInnerScope(dir, file, offset);
     }
 
-    function isScopeDirty(path, offset, scope) {
+    /**
+     * Is the inner scope dirty? (It is if the outer scope has changed since
+     * the last inner scope request)
+     */
+    function isScopeDirty(path, offset) {
         var split   = HintUtils.splitPath(path),
             dir     = split.dir,
             file    = split.file;
         
         return innerScopeDirty[dir][file];
     }
-    
+    /**
+     * Mark a file as dirty, which causes an outer scope request to trigger
+     * a reparse request. 
+     */
     function markFileDirty(dir, file) {
         if (!outerScopeDirty.hasOwnProperty(dir)) {
             outerScopeDirty[dir] = {};
@@ -325,6 +367,9 @@ define(function (require, exports, module) {
         });
     }
 
+    /*
+     * When a file changes, mark it as being dirty and refresh its outer scope.
+     */
     function handleFileChange(path) {
         var split   = HintUtils.splitPath(path),
             dir     = split.dir,

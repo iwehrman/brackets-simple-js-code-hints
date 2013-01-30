@@ -21,7 +21,6 @@
  * 
  */
 
-
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
 /*global define */
 
@@ -30,6 +29,10 @@ define(function (require, exports, module) {
 
     function Scope(obj, parent) {
 
+        /*
+         * Given a member expression, try to add a target-property association
+         * to the given scope.
+         */
         function _buildAssociations(object, property, parent) {
             if (property.type === "Identifier") {
                 if (object.type === "Identifier") {
@@ -49,6 +52,9 @@ define(function (require, exports, module) {
             }
         }
 
+        /*
+         * Build scope information for an AST as a child scope of parent.
+         */
         function _buildScope(tree, parent) {
             var child;
 
@@ -292,6 +298,11 @@ define(function (require, exports, module) {
             }
         }
         
+        /*
+         * Build a scope object from an object that has all the necessary data
+         * but the wrong prototype. Such objects may be created as a result of
+         * e.g., JSON-marshalling and unmarshalling a scope.
+         */
         function _rebuildScope(scope, data) {
             var child, i;
             scope.range = data.range;
@@ -335,15 +346,24 @@ define(function (require, exports, module) {
         }
     }
 
+    /* 
+     * Add an identifier occurrence.
+     */
     Scope.prototype.addIdOccurrence = function (id) {
         this.idOccurrences.push(id);
     };
     
+    /*
+     * Add an identifier declaration
+     */
     Scope.prototype.addDeclaration = function (id) {
         this.idDeclarations.push(id);
         this.addIdOccurrence(this);
     };
     
+    /*
+     * Add a list of identifier declarations
+     */
     Scope.prototype.addAllDeclarations = function (ids) {
         var that = this;
         ids.forEach(function (i) {
@@ -351,18 +371,30 @@ define(function (require, exports, module) {
         });
     };
     
+    /* 
+     * Add a property occurrence
+     */
     Scope.prototype.addProperty = function (prop) {
         this.propOccurrences.push(prop);
     };
 
+    /* 
+     * Add an association object
+     */
     Scope.prototype.addAssociation = function (obj, prop) {
         this.associations.push({object: obj, property: prop});
     };
     
+    /*
+     * Add a literal occurrence
+     */
     Scope.prototype.addLiteralOccurrence = function (lit) {
         this.literals.push(lit);
     };
 
+    /*
+     * Attach a new child scope to the current scope
+     */
     Scope.prototype.addChildScope = function (child) {
         var i = 0;
         
@@ -373,6 +405,9 @@ define(function (require, exports, module) {
         this.children.splice(i, 0, child);
     };
     
+    /*
+     * Find the child scope of the current scope for a given position
+     */
     Scope.prototype.findChild = function (pos) {
         var i;
         
@@ -390,6 +425,9 @@ define(function (require, exports, module) {
         }
     };
     
+    /* 
+     * Is the symbol declared in this scope?
+     */
     Scope.prototype.member = function (sym) {
         var i;
         
@@ -401,6 +439,9 @@ define(function (require, exports, module) {
         return false;
     };
     
+    /*
+     * Is the symbol declared in this scope or a parent scope?
+     */
     Scope.prototype.contains = function (sym) {
         var depth = 0,
             child = this;
@@ -417,10 +458,16 @@ define(function (require, exports, module) {
         return undefined;
     };
     
+    /*
+     * Does this scope, or its children, contain the given position?
+     */
     Scope.prototype.containsPosition = function (pos) {
         return this.range.start <= pos && pos <= this.range.end;
     };
     
+    /*
+     * Does this scope, but not its children, contain the given position? 
+     */
     Scope.prototype.containsPositionImmediate = function (pos) {
         var children = this.children,
             i;
@@ -452,6 +499,9 @@ define(function (require, exports, module) {
         return result;
     };
 
+    /* 
+     * Traverse a particular list in the scope down via children
+     */
     Scope.prototype.walkDownList = function (addItem, init, listName) {
         function addList(scope, init) {
             var list = scope[listName];
@@ -462,23 +512,38 @@ define(function (require, exports, module) {
         
         return this.walkDown(addList, init);
     };
-        
+       
+    /*
+     * Traverse identifier declarations in the scope down via children
+     */
     Scope.prototype.walkDownDeclarations = function (add, init) {
         return this.walkDownList(add, init, 'idDeclarations');
     };
 
+    /*
+     * Traverse identifier occurrences in the scope down via children
+     */
     Scope.prototype.walkDownIdentifiers = function (add, init) {
         return this.walkDownList(add, init, 'idOccurrences');
     };
 
+    /*
+     * Traverse property occurrences in the scope down via children
+     */
     Scope.prototype.walkDownProperties = function (add, init) {
         return this.walkDownList(add, init, 'propOccurrences');
     };
 
+    /*
+     * Traverse associations in the scope down via children
+     */
     Scope.prototype.walkDownAssociations = function (add, init) {
         return this.walkDownList(add, init, 'associations');
     };
 
+    /*
+     * Traverse literals in the scope down via children
+     */
     Scope.prototype.walkDownLiterals = function (add, init) {
         return this.walkDownList(add, init, 'literals');
     };
@@ -501,29 +566,44 @@ define(function (require, exports, module) {
         return result;
     };
     
+    /**
+     * Traverse identifier declarations in the scope up via the parent
+     */
     Scope.prototype.walkUpDeclarations = function (add, init) {
         return this.walkUp(add, init, 'idDeclarations');
     };
     
+    /**
+     * Traverse identifier occurrences in the scope up via the parent
+     */
     Scope.prototype.walkUpIdentifiers = function (add, init) {
         return this.walkUp(add, init, 'idOccurrences');
     };
 
+    /**
+     * Traverse property occurrences in the scope up via the parent
+     */
     Scope.prototype.walkUpProperties = function (add, init) {
         return this.walkUp(add, init, 'propOccurrences');
     };
-    
-    Scope.prototype.getAllDeclarations = function () {
-        var ids = [],
-            scope = this;
 
-        do {
-            ids = ids.concat(this.idDeclarations);
-            scope = scope.parent;
-        } while (scope !== null);
-        return ids;
+    /**
+     * Traverse associations in the scope up via the parent
+     */
+    Scope.prototype.walkUpAssociations = function (add, init) {
+        return this.walkUp(add, init, 'associations');
     };
-
+    
+    /**
+     * Traverse literal occurrences in the scope up via the parent
+     */
+    Scope.prototype.walkUpLiterals = function (add, init) {
+        return this.walkUp(add, init, 'literals');
+    };
+    
+    /**
+     * Return a string representations of declarations below this scope
+     */
     Scope.prototype.toStringBelow = function () {
         return "[" + this.range.start + " " + this.idDeclarations.map(function (i) {
             return i.name;
@@ -533,6 +613,9 @@ define(function (require, exports, module) {
             }).join("; ")) + this.range.end + "]";
     };
 
+    /**
+     * Return a string representations of declarations in this scope
+     */
     Scope.prototype.toString = function () {
         return "[" + this.range.start + " " + this.idDeclarations.map(function (i) {
             return i.name;
