@@ -39,6 +39,7 @@ define(function (require, exports, module) {
         cachedHints         = null,  // sorted hints for the current hinting session
         cachedType          = null,  // describes the lookup type and the object context
         cachedScope         = null,  // the inner-most scope returned by the query worker
+        cachedLine          = null,  // the line number for the cached scope
         $deferredHints      = null,  // deferred hint object
         $deferredScope      = null;  // deferred scope object
 
@@ -182,6 +183,7 @@ define(function (require, exports, module) {
     
             session.setScopeInfo(scopeInfo);
             cachedScope = scopeInfo.scope;
+            cachedLine = session.getCursor.line;
             cachedType = session.getType();
             cachedHints = session.getHints();
             
@@ -198,19 +200,27 @@ define(function (require, exports, module) {
             if (token && HintUtils.hintable(token)) {
                 var path        = session.getPath(),
                     offset      = session.getOffset(),
+                    line        = session.getCursor().line,
                     scopeInfo;
                 
-                if (!cachedScope || ScopeManager.isScopeDirty(path, offset, cachedScope) ||
+                // get a new scope if: 1) none exists; 2) the cursor has moved
+                // more than a single line; 3) the scope is dirty; or 4) if 
+                // the cursor has moved into a different scope.
+                if (!cachedScope ||
+                        Math.abs(line - cachedLine) > 1 ||
+                        ScopeManager.isScopeDirty(path, offset, cachedScope) ||
                         !cachedScope.containsPositionImmediate(offset)) {
                     scopeInfo = ScopeManager.getScope(path, offset);
                     cachedHints = null;
                     if (scopeInfo.hasOwnProperty("deferred")) {
                         cachedScope = null;
+                        cachedLine = null;
                         
                         $deferredScope = scopeInfo.deferred;
                         $deferredScope.done(handleScope);
                     } else {
                         cachedScope = scopeInfo.scope;
+                        cachedLine = session.getCursor().line;
                         session.setScopeInfo(scopeInfo);
                         
                         if ($deferredScope && $deferredScope.state() === "pending") {
@@ -319,6 +329,7 @@ define(function (require, exports, module) {
             ScopeManager.handleEditorChange(editor.document.file.fullPath);
             session = new Session(editor);
             cachedScope = null;
+            cachedLine = null;
             cachedHints = null;
             cachedType = null;
             
