@@ -75,7 +75,7 @@ define(function (require, exports, module) {
         
         return this.editor.indexFromPos(cursor);
     };
-    
+
     /**
      * Get the token at the current cursor position
      */
@@ -149,6 +149,33 @@ define(function (require, exports, module) {
     };
     
     /**
+     * Find the context of a property lookup.
+     */
+    Session.prototype.getContext = function (cursor, depth) {
+        var cm          = this.editor._codeMirror,
+            token       = cm.getTokenAt(cursor);
+
+        if (depth === undefined) {
+            depth = 0;
+        }
+
+        if (token.string === ")") {
+            this._getPreviousToken(cursor);
+            return this.getContext(cursor, ++depth);
+        } else if (token.string === "(") {
+            this._getPreviousToken(cursor);
+            return this.getContext(cursor, --depth);
+        } else {
+            if (depth > 0 || token.string === ".") {
+                this._getPreviousToken(cursor);
+                return this.getContext(cursor, depth);
+            } else {
+                return token.string;
+            }
+        }
+    };
+
+    /**
      * Get the type of the type of the current session, i.e., whether it is a
      * property lookup and, if so, what the context of the lookup is. 
      */
@@ -156,31 +183,25 @@ define(function (require, exports, module) {
         var propertyLookup  = false,
             context         = null,
             cursor          = this.getCursor(),
-            token           = this.getCurrentToken(),
-            prevToken       = this._getPreviousToken(cursor),
-            prevPrevToken       = this._getPreviousToken(cursor);
+            token           = this.getCurrentToken();
 
-        if (prevToken && prevToken.string === ".") {
-            propertyLookup = true;
-            context = prevPrevToken.string;
-        } else if (token) {
-            
-            if (token.className === "property") {
-                propertyLookup = true;
-                if (prevToken.string === ".") {
-                    token = prevToken;
-                    prevToken = prevPrevToken;
-                }
-            }
-
+        if (token) {
             if (token.string === ".") {
                 propertyLookup = true;
-                if (prevToken && HintUtils.hintable(prevToken)) {
-                    context = prevToken.string;
+                context = this.getContext(cursor);
+            } else {
+                if (token.className === "property") {
+                    propertyLookup = true;
+                }
+
+                token = this._getPreviousToken(cursor);
+                if (token && token.string === ".") {
+                    propertyLookup = true;
+                    context = this.getContext(cursor);
                 }
             }
         }
-                
+
         return {
             property: propertyLookup,
             context: context
