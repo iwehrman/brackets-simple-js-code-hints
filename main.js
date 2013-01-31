@@ -186,7 +186,7 @@ define(function (require, exports, module) {
     
             session.setScopeInfo(scopeInfo);
             cachedScope = scopeInfo.scope;
-            cachedLine = session.getCursor.line;
+            cachedLine = session.getCursor().line;
             cachedType = session.getType();
             cachedHints = session.getHints();
             
