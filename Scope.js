@@ -41,6 +41,8 @@ define(function (require, exports, module) {
                     if (object.computed === false) {
                         _buildAssociations(object.property, property, parent);
                     }
+                } else if (object.type === "CallExpression") {
+                    _buildAssociations(object.callee, property, parent);
                 } else {
                     // most likely a call expression or a literal
                     return;
