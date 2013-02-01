@@ -250,14 +250,6 @@ define(function (require, exports, module) {
             refreshOuterScope(dir, file);
             return { deferred: pendingRequest.deferred };
         } else {
-            // Reject any pending requests for scopes. 
-            if (pendingRequest) {
-                if (pendingRequest.deferred && pendingRequest.deferred.state() === "pending") {
-                    pendingRequest.deferred.reject();
-                }
-                pendingRequest = null;
-            }
-            
             // The inner scope will be clean after this
             innerScopeDirty[dir][file] = false;
             
@@ -382,8 +374,6 @@ define(function (require, exports, module) {
         var dir     = response.dir,
             file    = response.file,
             path    = dir + file,
-            offset,
-            $deferred,
             scopeInfo;
 
         if (outerWorkerActive[dir][file]) {
@@ -411,12 +401,11 @@ define(function (require, exports, module) {
 
                 if (pendingRequest !== null && pendingRequest.dir === dir &&
                         pendingRequest.file === file) {
-                    offset = pendingRequest.offset;
-                    $deferred = pendingRequest.deferred;
-                    if ($deferred.state() === "pending") {
-                        scopeInfo = refreshInnerScope(dir, file, offset);
+                    if (pendingRequest.deferred.state() === "pending") {
+                        scopeInfo = refreshInnerScope(dir, file, pendingRequest.offset);
                         if (scopeInfo && !scopeInfo.deferred) {
-                            $deferred.resolveWith(null, [scopeInfo]);
+                            pendingRequest.deferred.resolveWith(null, [scopeInfo]);
+                            pendingRequest = null;
                         }
                     }
                 }
