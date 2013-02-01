@@ -30,6 +30,75 @@ define(function (require, exports, module) {
     var HintUtils       = require("HintUtils"),
         ScopeManager    = require("ScopeManager");
 
+    /*
+     * Annotate list of identifiers with their scope level
+     */
+    function annotateIdentifers(identifiers, scope) {
+        return identifiers.map(function (t) {
+            var level = scope.contains(t.value);
+
+            if (level >= 0) {
+                t.level = level;
+            } else {
+                t.level = -1;
+            }
+            return t;
+        });
+    }
+
+    /*
+     * Annotate a list of properties with their association level
+     */
+    function annotateProperties(properties, association) {
+        return properties.map(function (t) {
+            if (association[t.value] > 0) {
+                t.level = 0;
+            }
+            return t;
+        });
+    }
+
+    /*
+     * Annotate a list of tokens as being global variables
+     */
+    function annotateGlobals(globals) {
+        return globals.map(function (t) {
+            t.global = true;
+            return t;
+        });
+    }
+
+    /*
+     * Annotate a list of tokens as literals of a particular kind;
+     * if string literals, annotate with an appropriate delimiter. 
+     */
+    function annotateLiterals(literals, kind) {
+        return literals.map(function (t) {
+            t.literal = true;
+            t.kind = kind;
+            if (t.value.indexOf(HintUtils.DOUBLE_QUOTE) > 0) {
+                if (t.value.indexOf(HintUtils.SINGLE_QUOTE) > 0) {
+                    t.delimeter = HintUtils.DOUBLE_QUOTE;
+                } else {
+                    t.delimeter = HintUtils.SINGLE_QUOTE;
+                }
+            } else {
+                t.delimeter = HintUtils.DOUBLE_QUOTE;
+            }
+            return t;
+        });
+    }
+
+    /* 
+     * Annotate a list of tokens as keywords
+     */
+    function annotateKeywords(keywords) {
+        return keywords.map(function (t) {
+            t.keyword = true;
+            return t;
+        });
+    }
+
     /**
      * Session objects encapsulate state associated with a hinting session
      * and provide methods for updating and querying the session.
@@ -37,6 +106,8 @@ define(function (require, exports, module) {
     function Session(editor) {
         this.editor = editor;
         this.path = editor.document.file.fullPath;
+        this.keywords = annotateKeywords(HintUtils.KEYWORDS);
+        this.builtinLiterals = annotateLiterals(HintUtils.LITERALS);
     }
 
     /**
@@ -44,10 +115,10 @@ define(function (require, exports, module) {
      */
     Session.prototype.setScopeInfo = function (scopeInfo) {
         this.scope = scopeInfo.scope;
-        this.identifiers = scopeInfo.identifiers;
-        this.globals = scopeInfo.globals;
+        this.identifiers = annotateIdentifers(scopeInfo.identifiers, scopeInfo.scope);
+        this.globals = annotateGlobals(scopeInfo.globals);
+        this.literals = annotateLiterals(scopeInfo.literals, "string");
         this.properties = scopeInfo.properties;
-        this.literals = scopeInfo.literals;
         this.associations = scopeInfo.associations;
     };
 
@@ -372,75 +443,6 @@ define(function (require, exports, module) {
         }
         
         /*
-         * Annotate list of identifiers with their scope level
-         */
-        function annotateIdentifers(identifiers, scope) {
-            return identifiers.map(function (t) {
-                var level = scope.contains(t.value);
-                
-                if (level >= 0) {
-                    t.level = level;
-                } else {
-                    t.level = -1;
-                }
-                return t;
-            });
-        }
-        
-        /*
-         * Annotate a list of properties with their association level
-         */
-        function annotateProperties(properties, association) {
-            return properties.map(function (t) {
-                if (association[t.value] > 0) {
-                    t.level = 0;
-                }
-                return t;
-            });
-        }
-        
-        /*
-         * Annotate a list of tokens as being global variables
-         */
-        function annotateGlobals(globals) {
-            return globals.map(function (t) {
-                t.global = true;
-                return t;
-            });
-        }
-        
-        /*
-         * Annotate a list of tokens as literals of a particular kind;
-         * if string literals, annotate with an appropriate delimiter. 
-         */
-        function annotateLiterals(literals, kind) {
-            return literals.map(function (t) {
-                t.literal = true;
-                t.kind = kind;
-                if (t.value.indexOf(HintUtils.DOUBLE_QUOTE) > 0) {
-                    if (t.value.indexOf(HintUtils.SINGLE_QUOTE) > 0) {
-                        t.delimeter = HintUtils.DOUBLE_QUOTE;
-                    } else {
-                        t.delimeter = HintUtils.SINGLE_QUOTE;
-                    }
-                } else {
-                    t.delimeter = HintUtils.DOUBLE_QUOTE;
-                }
-                return t;
-            });
-        }
-        
-        /* 
-         * Annotate a list of tokens as keywords
-         */
-        function annotateKeywords(keywords) {
-            return keywords.map(function (t) {
-                t.keyword = true;
-                return t;
-            });
-        }
-        
-        /*
          * Clone a list of hints. (Used so that later annotations are not 
          * preserved when scope information changes.)
          */
@@ -475,12 +477,12 @@ define(function (require, exports, module) {
                 hints.sort(compareProperties({}, this.path, offset));
             }
         } else {
-            hints = annotateIdentifers(copyHints(this.identifiers), this.scope);
-            hints = hints.concat(annotateLiterals(copyHints(this.literals), "string"));
+            hints = copyHints(this.identifiers);
+            hints = hints.concat(copyHints(this.literals));
             hints.sort(compareIdentifiers(offset));
-            hints = hints.concat(annotateGlobals(this.globals));
-            hints = hints.concat(annotateLiterals(HintUtils.LITERALS));
-            hints = hints.concat(annotateKeywords(HintUtils.KEYWORDS));
+            hints = hints.concat(this.globals);
+            hints = hints.concat(this.builtinLiterals);
+            hints = hints.concat(this.keywords);
         }
         
         return hints;
