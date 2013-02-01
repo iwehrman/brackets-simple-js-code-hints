@@ -107,7 +107,7 @@ define(function (require, exports, module) {
     }, {});
 
     var JSL_GLOBALS_BROWSER = [
-            JSL_GLOBALS.clearInteval,
+            JSL_GLOBALS.clearInterval,
             JSL_GLOBALS.clearTimeout,
             JSL_GLOBALS.document,
             JSL_GLOBALS.event,
