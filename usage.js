@@ -110,7 +110,12 @@ define(function (require, exports, module) {
             if (session && !session.finished) {
                 session.succeeded = false;
                 session.finished = true;
-                endSession(hints);
+                try {
+                    endSession(hints);
+                } catch (err) {
+                    // FIXME: this is a temporary workaround for broken deferred hint logging
+                    session = null;
+                }
             }
 
             keystrokes++;
