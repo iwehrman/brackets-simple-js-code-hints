@@ -273,6 +273,7 @@ define(function (require, exports, module) {
                     }
                     
                     $(this).triggerHandler("hintResponse", [query]);
+
                     return getResponse(cachedHints, query);
                 } else if ($deferredScope && $deferredScope.state() === "pending") {
                     // If there is no cached scope object, we cannot return hints.
