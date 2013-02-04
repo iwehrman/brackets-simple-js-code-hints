@@ -30,36 +30,52 @@ define(function (require, exports, module) {
     var PreferencesManager = brackets.getModule("preferences/PreferencesManager");
 
     require("Math.uuid");
-    
-    var SERVER_URL      = "http://js-hints.wehrman.org:8080/a",
-        PREFERENCES_KEY = "brackets-js-hints",
-        CLIENT_ID_KEY   = "client-id";
+
+    var SERVER_URL          = "http://js-hints.wehrman.org:8080/a",
+        PREFERENCES_KEY     = "brackets-js-hints",
+        CLIENT_ID_KEY       = "client-id",
+        PROCESS_INTERVAL    = 1000 * 60;
 
     function listen(obj) {
 
-        function save(obj) {
-            var response = JSON.stringify(obj);
-            $.ajax({
-                type    : "POST",
-                url     : SERVER_URL,
-                data    : { s: response }
-            }).fail(function (jqXhr, msg, err) {
-                console.log("Error: " + msg);
-            });
-        }
-
-        var session         = null,
+        var sessionQueue    = [],
+            session         = null,
             keystrokes      = 0,
             hints           = null,
             type            = null,
             prefs           = PreferencesManager.getPreferenceStorage(PREFERENCES_KEY),
             userId          = prefs.getValue(CLIENT_ID_KEY);
-        
-        if (!userId) {
-            userId = Math.uuidFast();
-            prefs.setValue(CLIENT_ID_KEY, userId);
+
+        /*
+         * Attempt to JSON-encode the queue of sessions and send them to the
+         * server for processing, repeating after PROCESS_INTERVAL milliseconds
+         * have passed.
+         */
+        function processQueue() {
+            var queueLength     = sessionQueue.length,
+                encodedSessions;
+
+            if (queueLength > 0) {
+                encodedSessions = JSON.stringify(sessionQueue);
+                $.ajax({
+                    type    : "POST",
+                    url     : SERVER_URL,
+                    data    : { s: encodedSessions }
+                }).done(function () {
+                    sessionQueue = sessionQueue.slice(queueLength);
+                }).fail(function (jqXhr, msg, err) {
+                    console.log("Error sending usage information: " + msg);
+                }).always(function () {
+                    setTimeout(processQueue, PROCESS_INTERVAL);
+                });
+            } else {
+                setTimeout(processQueue, PROCESS_INTERVAL);
+            }
         }
 
+        /*
+         * Initialize a new session object
+         */
         function makeSession(key) {
             return {
                 userid       : userId,
@@ -72,8 +88,11 @@ define(function (require, exports, module) {
             };
         }
         
+        /*
+         * Finalize the current session by summarizing the response list and
+         * pushing the completed session object onto the queue to be saved.
+          */
         function endSession(hints, completion) {
-            
             // sessions should be finished on save
             console.assert(session.finished);
             delete session.finished;
@@ -100,14 +119,22 @@ define(function (require, exports, module) {
                 }
                 delete resp.query;
             });
-            
-            save(session);
+
+            sessionQueue.push(session);
             session = null;
             hints = null;
             type = null;
             keystrokes = 0;
         }
 
+        // Initialize the user ID with a random UUID and save it in the
+        // preferences database if it doesn't already exist.
+        if (!userId) {
+            userId = Math.uuidFast();
+            prefs.setValue(CLIENT_ID_KEY, userId);
+        }
+
+        // Handle the various hinting session events
         $(obj).on("hasHints", function (event) {
             if (session && !session.finished) {
                 session.succeeded = false;
@@ -152,6 +179,9 @@ define(function (require, exports, module) {
             session.finished = true;
             endSession(hints, hint);
         });
+
+        // Begin processing the session queue
+        setTimeout(processQueue, PROCESS_INTERVAL);
     }
 
     exports.listen = listen;
