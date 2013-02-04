@@ -181,7 +181,7 @@ define(function (require, exports, module) {
         /*
          * Resolve deferred hints upon resolution of a deferred scope
          */
-        function handleScope(scopeInfo) {
+        var handleScope = function (scopeInfo) {
             var query   = session.getQuery(),
                 response;
     
@@ -190,12 +190,14 @@ define(function (require, exports, module) {
             cachedLine = session.getCursor().line;
             cachedType = session.getType();
             cachedHints = session.getHints();
-            
+
+            $(this).triggerHandler("resolvedResponse", [cachedHints, cachedType]);
+
             if ($deferredHints && $deferredHints.state() === "pending") {
                 response = getResponse(cachedHints, query);
                 $deferredHints.resolveWith(null, [response]);
             }
-        }
+        };
 
         $(this).triggerHandler("hasHints");
 
@@ -229,7 +231,7 @@ define(function (require, exports, module) {
                         cachedLine = null;
                         
                         $deferredScope = scopeInfo.deferred;
-                        $deferredScope.done(handleScope);
+                        $deferredScope.done(handleScope.bind(this));
                     } else {
                         cachedScope = scopeInfo.scope;
                         cachedLine = session.getCursor().line;

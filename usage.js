@@ -28,7 +28,7 @@ define(function (require, exports, module) {
     "use strict";
 
     var PreferencesManager = brackets.getModule("preferences/PreferencesManager");
-    
+
     require("Math.uuid");
     
     var SERVER_URL      = "http://js-hints.wehrman.org:8080/a",
@@ -77,7 +77,7 @@ define(function (require, exports, module) {
             // sessions should be finished on save
             console.assert(session.finished);
             delete session.finished;
-            session.property = type.property;
+            session.property = type ? type.property : undefined;
             
             session.responses.forEach(function (resp) {
                 if (!resp.deferred) {
@@ -103,6 +103,8 @@ define(function (require, exports, module) {
             
             save(session);
             session = null;
+            hints = null;
+            type = null;
             keystrokes = 0;
         }
 
@@ -110,12 +112,7 @@ define(function (require, exports, module) {
             if (session && !session.finished) {
                 session.succeeded = false;
                 session.finished = true;
-                try {
-                    endSession(hints);
-                } catch (err) {
-                    // FIXME: this is a temporary workaround for broken deferred hint logging
-                    session = null;
-                }
+                endSession(hints);
             }
 
             keystrokes++;
@@ -143,6 +140,9 @@ define(function (require, exports, module) {
             session.responses.push({
                 deferred    : true
             });
+        }).on("resolvedResponse", function (event, newhints, newtype) {
+            hints = newhints;
+            type = newtype;
         }).on("nullResponse", function (event) {
             session.succeeded = false;
             session.finished = true;
