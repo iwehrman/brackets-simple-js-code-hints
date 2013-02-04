@@ -297,6 +297,15 @@ define(function (require, exports, module) {
             end         = {line: cursor.line, ch: (token ? token.end : cursor.ch)},
             delimeter;
 
+        if (token && token.string === ".") {
+            var nextToken = session.getNextToken();
+            if (nextToken && // don't replace delimiters, etc.
+                    HintUtils.maybeIdentifier(nextToken.string) &&
+                    HintUtils.hintable(nextToken)) {
+                end.ch = nextToken.end;
+            }
+        }
+
         // If the hint is a string literal, choose a delimiter in which
         // to wrap it, preserving the existing delimiter if possible.
         if (hint.literal && hint.kind === "string") {
@@ -314,7 +323,7 @@ define(function (require, exports, module) {
         }
 
         // Replace the current token with the completion
-        session.editor._codeMirror.replaceRange(completion, start, end);
+        session.editor.document.replaceRange(completion, start, end);
 
         // Return false to indicate that another hinting session is not needed
         return false;
