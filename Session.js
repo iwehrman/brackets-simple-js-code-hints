@@ -89,7 +89,8 @@ define(function (require, exports, module) {
     };
     
     /**
-     * Get the token after the one at the given cursor
+     * Get the token after the one at the given cursor on the same line, if one
+     * exists.
      */
     Session.prototype.getNextToken = function () {
         var cm      = this.editor._codeMirror,
@@ -100,8 +101,6 @@ define(function (require, exports, module) {
         if (cursor.ch < line.length) {
             return cm.getTokenAt({ch: cursor.ch + 1,
                                   line: cursor.line});
-        } else if (doc.getLine(cursor.line + 1)) {
-            return cm.getTokenAt({ch: 0, line: cursor.line + 1});
         } else {
             return null;
         }

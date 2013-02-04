@@ -18,10 +18,9 @@ define(function (require, exports, module) {
         testEditor;
 
     /**
-     * Returns a Document and Editor suitable for use with an Editor in
-     * isolation: i.e., a Document that will never be set as the
-     * currentDocument or added to the working set.
-     * @return {!{doc:{Document}, editor:{Editor}}}
+     * Returns an Editor suitable for use in isolation: i.e., a Document that
+     * will never be set as the currentDocument or added to the working set.
+     * @return {!Editor}
      */
     function createMockEditor(doc, mode, visibleRange) {
         mode = mode || "";
@@ -143,13 +142,6 @@ define(function (require, exports, module) {
                 expect(hintList[index].data("token")).not.toBeNull();
                 expect(provider.insertHint(hintList[index])).toBe(false);
             });
-        }
-        
-        // Helper function for testing cursor position
-        function expectCursorAt(pos) {
-            var selection = testEditor.getSelection();
-            expect(selection.start).toEqual(selection.end);
-            expect(selection.start).toEqual(pos);
         }
         
         describe("JavaScript Code Hinting", function () {
@@ -380,10 +372,28 @@ define(function (require, exports, module) {
                 runs(function () {
                     expect(testEditor.getCursorPos()).toEqual(end);
                     expect(testDoc.getRange(start, end)).toEqual("A1.propA");
+                    expect(testDoc.getLine(end.line).length).toEqual(8);
                 });
             });
             
-            it("should insert property hints with a partial current query", function () {
+            it("should replace property hints with no current query", function () {
+                var start   = { line: 6, ch: 0 },
+                    middle  = { line: 6, ch: 3 },
+                    end     = { line: 6, ch: 8 };
+
+                testDoc.replaceRange("A1.prop", start, start);
+                testEditor.setCursorPos(middle);
+                var hintObj = expectHints(JSCodeHints.jsHintProvider);
+                selectHint(JSCodeHints.jsHintProvider, hintObj, 0); // hint 0 is "propA"
+                
+                runs(function () {
+                    expect(testEditor.getCursorPos()).toEqual(end);
+                    expect(testDoc.getRange(start, end)).toEqual("A1.propA");
+                    expect(testDoc.getLine(end.line).length).toEqual(8);
+                });
+            });
+            
+            it("should replace property hints with a partial current query", function () {
                 var start   = { line: 6, ch: 0 },
                     middle  = { line: 6, ch: 6 },
                     end     = { line: 6, ch: 8 };
@@ -395,10 +405,11 @@ define(function (require, exports, module) {
                 runs(function () {
                     expect(testEditor.getCursorPos()).toEqual(end);
                     expect(testDoc.getRange(start, end)).toEqual("A1.propA");
+                    expect(testDoc.getLine(end.line).length).toEqual(8);
                 });
             });
 
-            it("should insert property hints replacing a partial current query", function () {
+            it("should replace property hints replacing a partial current query", function () {
                 var start   = { line: 6, ch: 0 },
                     middle  = { line: 6, ch: 6 },
                     end     = { line: 6, ch: 8 };
@@ -410,6 +421,25 @@ define(function (require, exports, module) {
                 runs(function () {
                     expect(testEditor.getCursorPos()).toEqual(end);
                     expect(testDoc.getRange(start, end)).toEqual("A1.propA");
+                    expect(testDoc.getLine(end.line).length).toEqual(8);
+                });
+            });
+            
+            it("should replace property hints but not following delimiters", function () {
+                var start   = { line: 6, ch: 0 },
+                    middle  = { line: 6, ch: 4 },
+                    end     = { line: 6, ch: 9 },
+                    endplus = { line: 6, ch: 10 };
+
+                testDoc.replaceRange("(A1.prop)", start, start);
+                testEditor.setCursorPos(middle);
+                var hintObj = expectHints(JSCodeHints.jsHintProvider);
+                selectHint(JSCodeHints.jsHintProvider, hintObj, 0); // hint 0 is "propA"
+                
+                runs(function () {
+                    expect(testEditor.getCursorPos()).toEqual(end);
+                    expect(testDoc.getRange(start, endplus)).toEqual("(A1.propA)");
+                    expect(testDoc.getLine(endplus.line).length).toEqual(10);
                 });
             });
             
