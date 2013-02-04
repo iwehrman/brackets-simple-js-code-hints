@@ -126,22 +126,22 @@
     }
 
     function respond(dir, file, length, parseObj) {
-        var scope           = parseObj ? parseObj.scope : null,
-            globals         = parseObj ? parseObj.globals : null,
-            identifiers     = parseObj ? siftPositions(scope, scope.walkDownIdentifiers, "name") : null,
-            properties      = parseObj ? siftPositions(scope, scope.walkDownProperties, "name") : null,
-            literals        = parseObj ? siftPositions(scope, scope.walkDownLiterals, "value") : null,
-            associations    = parseObj ? siftAssociations(scope, scope.walkDownAssociations) : null,
+        var scope           = parseObj ? parseObj.scope : [],
+            globals         = parseObj ? parseObj.globals : [],
+            identifiers     = parseObj ? siftPositions(scope, scope.walkDownIdentifiers, "name") : [],
+            properties      = parseObj ? siftPositions(scope, scope.walkDownProperties, "name") : [],
+            literals        = parseObj ? siftPositions(scope, scope.walkDownLiterals, "value") : [],
+            associations    = parseObj ? siftAssociations(scope, scope.walkDownAssociations) : [],
             response        = {
                 type            : self.SCOPE_MSG_TYPE,
                 dir             : dir,
                 file            : file,
                 length          : length,
                 scope           : scope,
-                globals         : globals,
+                globals         : self.annotateGlobals(globals),
                 identifiers     : identifiers,
-                properties      : properties,
-                literals        : literals,
+                properties      : self.annotateWithPath(properties, dir, file),
+                literals        : self.annotateLiterals(literals, "string"),
                 associations    : associations,
                 success         : !!parseObj
             };

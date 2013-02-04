@@ -27,6 +27,11 @@
 define(function (require, exports, module) {
     "use strict";
 
+    var MODE_NAME       = "javascript",
+        SCOPE_MSG_TYPE  = "outerScope",
+        SINGLE_QUOTE    = "\'",
+        DOUBLE_QUOTE    = "\"";
+
     function makeToken(value, positions) {
         if (positions === undefined) {
             positions = [];
@@ -79,16 +84,101 @@ define(function (require, exports, module) {
         return name + "." + EVENT_TAG;
     }
 
-    var KEYWORDS = [
+    /*
+     * Annotate list of identifiers with their scope level
+     */
+    function annotateWithScope(identifiers, scope) {
+        return identifiers.map(function (t) {
+            var level = scope.contains(t.value);
+
+            if (level >= 0) {
+                t.level = level;
+            } else {
+                t.level = -1;
+            }
+            return t;
+        });
+    }
+
+    /*
+     * Annotate a list of properties with their association level
+     */
+    function annotateWithAssociation(properties, association) {
+        return properties.map(function (t) {
+            if (association[t.value] > 0) {
+                t.level = 0;
+            }
+            return t;
+        });
+    }
+
+    /*
+     * Annotate a list of tokens as being global variables
+     */
+    function annotateGlobals(globals) {
+        return globals.map(function (t) {
+            t.global = true;
+            return t;
+        });
+    }
+
+    /*
+     * Annotate a list of tokens as literals of a particular kind;
+     * if string literals, annotate with an appropriate delimiter. 
+     */
+    function annotateLiterals(literals, kind) {
+        return literals.map(function (t) {
+            t.literal = true;
+            t.kind = kind;
+            if (t.value.indexOf(DOUBLE_QUOTE) > 0) {
+                if (t.value.indexOf(SINGLE_QUOTE) > 0) {
+                    t.delimeter = DOUBLE_QUOTE;
+                } else {
+                    t.delimeter = SINGLE_QUOTE;
+                }
+            } else {
+                t.delimeter = DOUBLE_QUOTE;
+            }
+            return t;
+        });
+    }
+
+    /* 
+     * Annotate a list of tokens as keywords
+     */
+    function annotateKeywords(keywords) {
+        return keywords.map(function (t) {
+            t.keyword = true;
+            return t;
+        });
+    }
+
+    /* 
+     * Annotate a list of tokens as keywords
+     */
+    function annotateWithPath(tokens, dir, file) {
+        var path = dir + file;
+
+        return tokens.map(function (t) {
+            t.path = path;
+            return t;
+        });
+    }
+
+    var KEYWORD_NAMES   = [
         "break", "case", "catch", "continue", "debugger", "default", "delete",
         "do", "else", "finally", "for", "function", "if", "in", "instanceof",
         "new", "return", "switch", "this", "throw", "try", "typeof", "var",
         "void", "while", "with"
-    ].map(function (t) { return makeToken(t, []); });
+    ],
+        KEYWORD_TOKENS  = KEYWORD_NAMES.map(function (t) { return makeToken(t, []); }),
+        KEYWORDS        = annotateKeywords(KEYWORD_TOKENS);
     
-    var LITERALS = [
+    var LITERAL_NAMES   = [
         "true", "false", "null", "undefined"
-    ].map(function (t) { return makeToken(t, []); });
+    ],
+        LITERAL_TOKENS  = LITERAL_NAMES.map(function (t) { return makeToken(t, []); }),
+        LITERALS        = annotateLiterals(LITERAL_TOKENS);
 
     var JSL_GLOBALS = [
         "clearInterval", "clearTimeout", "document", "event", "frames",
@@ -188,21 +278,21 @@ define(function (require, exports, module) {
         windows : JSL_GLOBALS_WINDOWS
     };
     
-    var MODE_NAME       = "javascript",
-        SCOPE_MSG_TYPE  = "outerScope",
-        SINGLE_QUOTE    = "\'",
-        DOUBLE_QUOTE    = "\"";
-
-    exports.makeToken       = makeToken;
-    exports.hintable        = hintable;
-    exports.maybeIdentifier = maybeIdentifier;
-    exports.splitPath       = splitPath;
-    exports.eventName       = eventName;
-    exports.JSL_GLOBAL_DEFS = JSL_GLOBAL_DEFS;
-    exports.KEYWORDS        = KEYWORDS;
-    exports.LITERALS        = LITERALS;
-    exports.MODE_NAME       = MODE_NAME;
-    exports.SCOPE_MSG_TYPE  = SCOPE_MSG_TYPE;
-    exports.SINGLE_QUOTE    = SINGLE_QUOTE;
-    exports.DOUBLE_QUOTE    = DOUBLE_QUOTE;
+    exports.makeToken               = makeToken;
+    exports.hintable                = hintable;
+    exports.maybeIdentifier         = maybeIdentifier;
+    exports.splitPath               = splitPath;
+    exports.eventName               = eventName;
+    exports.annotateWithPath        = annotateWithPath;
+    exports.annotateLiterals        = annotateLiterals;
+    exports.annotateGlobals         = annotateGlobals;
+    exports.annotateWithScope       = annotateWithScope;
+    exports.annotateWithAssociation = annotateWithAssociation;
+    exports.JSL_GLOBAL_DEFS         = JSL_GLOBAL_DEFS;
+    exports.KEYWORDS                = KEYWORDS;
+    exports.LITERALS                = LITERALS;
+    exports.MODE_NAME               = MODE_NAME;
+    exports.SCOPE_MSG_TYPE          = SCOPE_MSG_TYPE;
+    exports.SINGLE_QUOTE            = SINGLE_QUOTE;
+    exports.DOUBLE_QUOTE            = DOUBLE_QUOTE;
 });
