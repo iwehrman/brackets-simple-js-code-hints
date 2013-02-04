@@ -100,7 +100,7 @@ define(function (require, exports, module) {
                     $hintObj.css('color', 'rgb(0,100,0)'); // green
                     break;
                 case 1:
-                    $hintObj.css('color', 'rgb(100,100,0)'); // yellow
+                    $hintObj.css('color', 'rgb(125,125,0)'); // yellow
                     break;
                 case 2:
                     $hintObj.css('color', 'rgb(0,0,100)'); // blue
