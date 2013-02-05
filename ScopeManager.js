@@ -387,10 +387,7 @@ define(function (require, exports, module) {
                 
                 allGlobals[dir][file] = response.globals;
                 allIdentifiers[dir][file] = response.identifiers;
-                allProperties[dir][file] = response.properties.map(function (p) {
-                    p.path = path;
-                    return p;
-                });
+                allProperties[dir][file] = response.properties;
                 allLiterals[dir][file] = response.literals;
                 allAssociations[dir][file] = response.associations;
                 innerScopeDirty[dir][file] = true;
