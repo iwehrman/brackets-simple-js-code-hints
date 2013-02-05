@@ -53,7 +53,7 @@ define(function (require, exports, module) {
     /**
      * Request a new outer scope object from the parser worker, if necessary
      */
-    function refreshOuterScope(dir, file) {
+    function refreshOuterScope(dir, file, text) {
 
         /* 
          * Initialize state maps for a given directory name and file name
@@ -119,15 +119,13 @@ define(function (require, exports, module) {
                 // the file will be clean since the last outer scope request
                 outerScopeDirty[dir][file] = false;
                 
-                // read the contents of the file, send it to the parser worker
-                FileUtils.readAsText(entry).done(function (text) {
-                    outerScopeWorker.postMessage({
-                        type        : HintUtils.SCOPE_MSG_TYPE,
-                        dir         : dir,
-                        file        : file,
-                        text        : text,
-                        force       : !outerScope[dir][file]
-                    });
+                // send text to the parser worker
+                outerScopeWorker.postMessage({
+                    type        : HintUtils.SCOPE_MSG_TYPE,
+                    dir         : dir,
+                    file        : file,
+                    text        : text,
+                    force       : !outerScope[dir][file]
                 });
             }
         }
@@ -247,7 +245,9 @@ define(function (require, exports, module) {
             }
             
             // Request the outer scope from the parser worker.
-            refreshOuterScope(dir, file);
+            DocumentManager.getDocumentForPath(dir + file).done(function (document) {
+                refreshOuterScope(dir, file, document.getText());
+            });
             return { deferred: pendingRequest.deferred };
         } else {
             // The inner scope will be clean after this
@@ -289,8 +289,9 @@ define(function (require, exports, module) {
      * Get a new inner scope, if possible. If there is no outer scope for the
      * given file, a deferred scope will be returned instead.
      */
-    function getScope(path, offset) {
-        var split   = HintUtils.splitPath(path),
+    function getScope(document, offset) {
+        var path    = document.file.fullPath,
+            split   = HintUtils.splitPath(path),
             dir     = split.dir,
             file    = split.file;
         
@@ -301,13 +302,15 @@ define(function (require, exports, module) {
      * Is the inner scope dirty? (It is if the outer scope has changed since
      * the last inner scope request)
      */
-    function isScopeDirty(path, offset) {
-        var split   = HintUtils.splitPath(path),
+    function isScopeDirty(document, offset) {
+        var path    = document.file.fullPath,
+            split   = HintUtils.splitPath(path),
             dir     = split.dir,
             file    = split.file;
         
         return innerScopeDirty[dir][file];
     }
+
     /**
      * Mark a file as dirty, which causes an outer scope request to trigger
      * a reparse request. 
@@ -323,8 +326,9 @@ define(function (require, exports, module) {
      * Refresh the outer scopes of the given file as well as of the other files
      * in the given directory.
      */
-    function handleEditorChange(path) {
-        var split       = HintUtils.splitPath(path),
+    function handleEditorChange(document) {
+        var path        = document.file.fullPath,
+            split       = HintUtils.splitPath(path),
             dir         = split.dir,
             file        = split.file,
             dirEntry    = new NativeFileSystem.DirectoryEntry(dir),
@@ -343,27 +347,30 @@ define(function (require, exports, module) {
                     if (file.indexOf(".") > 1) { // ignore /.dotfiles
                         var mode = EditorUtils.getModeFromFileExtension(entry.fullPath);
                         if (mode === HintUtils.MODE_NAME) {
-                            refreshOuterScope(dir, file);
+                            DocumentManager.getDocumentForPath(path).done(function (document) {
+                                refreshOuterScope(dir, file, document.getText());
+                            });
                         }
                     }
                 }
             });
         }, function (err) {
             console.log("Unable to refresh directory: " + err);
-            refreshOuterScope(dir, file);
+            refreshOuterScope(dir, file, document.getText());
         });
     }
 
     /*
      * When a file changes, mark it as being dirty and refresh its outer scope.
      */
-    function handleFileChange(path) {
-        var split   = HintUtils.splitPath(path),
+    function handleFileChange(document) {
+        var path    = document.file.fullPath,
+            split   = HintUtils.splitPath(path),
             dir     = split.dir,
             file    = split.file;
         
         markFileDirty(dir, file);
-        refreshOuterScope(dir, file);
+        refreshOuterScope(dir, file, document.getText());
     }
 
     /*
@@ -393,7 +400,9 @@ define(function (require, exports, module) {
                 innerScopeDirty[dir][file] = true;
 
                 if (outerScopeDirty[dir][file]) {
-                    refreshOuterScope(dir, file);
+                    DocumentManager.getDocumentForPath(path).done(function (document) {
+                        refreshOuterScope(dir, file, document.getText());
+                    });
                 }
 
                 if (pendingRequest !== null && pendingRequest.dir === dir &&

@@ -206,8 +206,7 @@ define(function (require, exports, module) {
 
             // don't autocomplete within strings or comments, etc.
             if (token && HintUtils.hintable(token)) {
-                var path        = session.getPath(),
-                    offset      = session.getOffset(),
+                var offset      = session.getOffset(),
                     line        = session.getCursor().line,
                     scopeInfo;
                 
@@ -218,9 +217,9 @@ define(function (require, exports, module) {
                 // if the cursor has moved into a different scope.
                 if (!cachedScope ||
                         Math.abs(line - cachedLine) > 1 ||
-                        ScopeManager.isScopeDirty(path, offset, cachedScope) ||
+                        ScopeManager.isScopeDirty(session.editor.document, offset) ||
                         !cachedScope.containsPositionImmediate(offset)) {
-                    scopeInfo = ScopeManager.getScope(path, offset);
+                    scopeInfo = ScopeManager.getScope(session.editor.document, offset);
                     cachedHints = null;
                     
                     // If the scope is deferred, deferred hints will have to
@@ -352,7 +351,7 @@ define(function (require, exports, module) {
          * information, and reject any pending deferred requests.
          */
         function handleEditorChange(editor) {
-            ScopeManager.handleEditorChange(editor.document.file.fullPath);
+            ScopeManager.handleEditorChange(editor.document);
             session = new Session(editor);
             cachedScope = null;
             cachedLine = null;
@@ -382,13 +381,11 @@ define(function (require, exports, module) {
                 return;
             }
 
-            var path = editor.document.file.fullPath;
-
             if (editor.getModeForSelection() === HintUtils.MODE_NAME) {
                 handleEditorChange(editor);
                 $(editor)
                     .on(HintUtils.eventName("change"), function () {
-                        ScopeManager.handleFileChange(path);
+                        ScopeManager.handleFileChange(editor.document);
                     });
             }
         }
