@@ -228,21 +228,16 @@ define(function (require, exports, module) {
         
         // If there is no outer scope, the inner scope request is deferred. 
         if (!outerScope[dir] || !outerScope[dir][file]) {
-            // Create a new deferred scope response if the existing response is
-            // for a different file or if one doesn't already exist.
-            if (!pendingRequest || pendingRequest.dir !== dir || pendingRequest.file !== file) {
-                
-                if (pendingRequest && pendingRequest.deferred.state() === "pending") {
-                    pendingRequest.deferred.reject();
-                }
-
-                pendingRequest = {
-                    dir         : dir,
-                    file        : file,
-                    offset      : offset,
-                    deferred    : $.Deferred()
-                };
+            if (pendingRequest && pendingRequest.deferred.state() === "pending") {
+                pendingRequest.deferred.reject();
             }
+
+            pendingRequest = {
+                dir         : dir,
+                file        : file,
+                offset      : offset,
+                deferred    : $.Deferred()
+            };
             
             // Request the outer scope from the parser worker.
             DocumentManager.getDocumentForPath(dir + file).done(function (document) {

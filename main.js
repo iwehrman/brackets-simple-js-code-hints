@@ -39,9 +39,7 @@ define(function (require, exports, module) {
         cachedHints         = null,  // sorted hints for the current hinting session
         cachedType          = null,  // describes the lookup type and the object context
         cachedScope         = null,  // the inner-most scope returned by the query worker
-        cachedLine          = null,  // the line number for the cached scope
-        $deferredHints      = null,  // deferred hint object
-        $deferredScope      = null;  // deferred scope object
+        cachedLine          = null;  // the line number for the cached scope
 
     /**
      * Creates a hint response object
@@ -143,7 +141,7 @@ define(function (require, exports, module) {
                 return $hintObj;
             });
         }
-        
+
         // trim leading and trailing string literal delimiters from the query
         if (query.indexOf(HintUtils.SINGLE_QUOTE) === 0 ||
                 query.indexOf(HintUtils.DOUBLE_QUOTE) === 0) {
@@ -176,26 +174,6 @@ define(function (require, exports, module) {
      * Determine whether hints are available for a given editor context
      */
     JSHints.prototype.hasHints = function (editor, key) {
-        
-        /*
-         * Resolve deferred hints upon resolution of a deferred scope
-         */
-        function handleScope(scopeInfo) {
-            var query   = session.getQuery(),
-                response;
-    
-            session.setScopeInfo(scopeInfo);
-            cachedScope = scopeInfo.scope;
-            cachedLine = session.getCursor().line;
-            cachedType = session.getType();
-            cachedHints = session.getHints();
-            
-            if ($deferredHints && $deferredHints.state() === "pending") {
-                response = getResponse(cachedHints, query);
-                $deferredHints.resolveWith(null, [response]);
-            }
-        }
-
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
             var token = session.getCurrentToken();
 
@@ -205,39 +183,17 @@ define(function (require, exports, module) {
                     line        = session.getCursor().line,
                     scopeInfo;
                 
-                // Try to get a new scope if: 1) none exists; 2) the cursor has 
-                // moved more than a single line; 3) the scope is dirty; or 4)
-                // if the cursor has moved into a different scope.
+                // Invalidate cached information if: 1) no scope exists; 2) the
+                // cursor has moved a line; 3) the scope is dirty; or 4) if the
+                // cursor has moved into a different scope.
                 if (!cachedScope ||
-                        Math.abs(line - cachedLine) > 1 ||
+                        cachedLine !== line ||
                         ScopeManager.isScopeDirty(session.editor.document, offset) ||
                         !cachedScope.containsPositionImmediate(offset)) {
-                    scopeInfo = ScopeManager.getScope(session.editor.document, offset);
+                    cachedScope = null;
+                    cachedLine = null;
                     cachedHints = null;
-                    
-                    // If the scope is deferred, deferred hints will have to
-                    // be returned as well. Otherwise, update the session with
-                    // the new scope information.
-                    if (scopeInfo.hasOwnProperty("deferred")) {
-                        cachedScope = null;
-                        cachedLine = null;
-                        
-                        $deferredScope = scopeInfo.deferred;
-                        $deferredScope.done(handleScope);
-                    } else {
-                        cachedScope = scopeInfo.scope;
-                        cachedLine = session.getCursor().line;
-                        session.setScopeInfo(scopeInfo);
-                        
-                        if ($deferredScope) {
-                            if ($deferredScope.state() === "pending") {
-                                $deferredScope.reject();
-                            }
-                            $deferredScope = null;
-                        }
-                    }
                 }
-
                 return true;
             }
         }
@@ -252,6 +208,45 @@ define(function (require, exports, module) {
         var token = session.getCurrentToken();
         if ((key === null) || HintUtils.maybeIdentifier(token.string)) {
             if (token && HintUtils.hintable(token)) {
+
+                if (!cachedScope) {
+                    var offset          = session.getOffset(),
+                        scopeResponse   = ScopeManager.getScope(session.editor.document, offset),
+                        self            = this;
+
+                    if (scopeResponse.hasOwnProperty("deferred")) {
+                        var $deferredHints = $.Deferred();
+                        scopeResponse.deferred.done(function (scopeInfo) {
+                            session.setScopeInfo(scopeInfo);
+                            cachedScope = scopeInfo.scope;
+                            cachedLine = session.getCursor().line;
+                            cachedType = session.getType();
+                            cachedHints = session.getHints();
+
+                            $(self).triggerHandler("resolvedResponse", [cachedHints, cachedType]);
+
+                            if ($deferredHints.state() === "pending") {
+                                var query           = session.getQuery(),
+                                    hintResponse    = getResponse(cachedHints, query);
+
+                                $deferredHints.resolveWith(null, [hintResponse]);
+                                $(self).triggerHandler("hintResponse", [query]);
+                            }
+                        }).fail(function () {
+                            if ($deferredHints.state() === "pending") {
+                                $deferredHints.reject();
+                            }
+                        });
+
+                        $(this).triggerHandler("deferredResponse");
+                        return $deferredHints;
+                    } else {
+                        session.setScopeInfo(scopeResponse);
+                        cachedScope = scopeResponse.scope;
+                        cachedLine = session.getCursor().line;
+                    }
+                }
+
                 if (cachedScope) {
                     var type    = session.getType(),
                         query   = session.getQuery();
@@ -264,16 +259,7 @@ define(function (require, exports, module) {
                         cachedType = type;
                         cachedHints = session.getHints();
                     }
-                    
                     return getResponse(cachedHints, query);
-                } else if ($deferredScope && $deferredScope.state() === "pending") {
-                    // If there is no cached scope object, we cannot return hints.
-                    // Instead, return a deferred response that will be resolved 
-                    // when a scope is received.
-                    if (!$deferredHints || $deferredHints.isRejected()) {
-                        $deferredHints = $.Deferred();
-                    }
-                    return $deferredHints;
                 }
             }
         }
@@ -343,20 +329,6 @@ define(function (require, exports, module) {
             cachedLine = null;
             cachedHints = null;
             cachedType = null;
-            
-            if ($deferredHints) {
-                if ($deferredHints.state() === "pending") {
-                    $deferredHints.reject();
-                }
-                $deferredHints = null;
-            }
-            
-            if ($deferredScope) {
-                if ($deferredScope.state() === "pending") {
-                    $deferredScope.reject();
-                }
-                $deferredScope = null;
-            }
         }
 
         /*
