@@ -150,7 +150,8 @@ define(function (require, exports, module) {
     };
     
     /**
-     * Find the context of a property lookup.
+     * Find the context of a property lookup. For example, for a lookup 
+     * foo(bar, baz(quux)).prop, foo is the context.
      */
     Session.prototype.getContext = function (cursor, depth) {
         var cm          = this.editor._codeMirror,
@@ -262,25 +263,23 @@ define(function (require, exports, module) {
          * Comparator for sorting tokens lexicographically according to scope,
          * assuming the scope level has already been annotated.
          */
-        function compareByScope() {
-            return function (a, b) {
-                var adepth = a.level;
-                var bdepth = b.level;
+        function compareByScope(a, b) {
+            var adepth = a.level;
+            var bdepth = b.level;
 
-                if (adepth >= 0) {
-                    if (bdepth >= 0) {
-                        return adepth - bdepth;
-                    } else {
-                        return -1;
-                    }
+            if (adepth >= 0) {
+                if (bdepth >= 0) {
+                    return adepth - bdepth;
                 } else {
-                    if (bdepth >= 0) {
-                        return 1;
-                    } else {
-                        return 0;
-                    }
+                    return -1;
                 }
-            };
+            } else {
+                if (bdepth >= 0) {
+                    return 1;
+                } else {
+                    return 0;
+                }
+            }
         }
         
         /*
@@ -357,7 +356,7 @@ define(function (require, exports, module) {
          * A comparator for identifiers
          */
         function compareIdentifiers(pos) {
-            return lexicographic(compareByScope(),
+            return lexicographic(compareByScope,
                         lexicographic(compareByPosition(pos),
                             compareByName));
         }
