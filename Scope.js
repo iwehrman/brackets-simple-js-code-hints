@@ -28,6 +28,82 @@ define(function (require, exports, module) {
     "use strict";
 
     function Scope(obj, parent) {
+        
+        var DEFINE      = "define",
+            REQUIRE     = "require",
+            EXPORTS     = "exports",
+            MODULE      = "module";
+        
+        function _buildExports(tree, parent) {
+            if (parent) {
+                if (parent.moduleType && parent.moduleType.direct) {
+                    if (tree.type === "ObjectExpression" && tree.properties) {
+                        tree.properties.forEach(function (prop) {
+                            parent.addExport(prop.key);
+                        });
+                    }
+                }
+            }
+        }
+        
+        function _buildDependency(left, right, parent) {
+            if (parent.)
+        }
+        
+        function _buildModule(tree, parent) {
+            
+            var args,
+                dependencies = null,
+                wrapper;
+            
+            if (tree.callee.type === "Identifier" && tree.callee.name === DEFINE) {
+                args = tree["arguments"];
+            
+                if (args.length > 0) {
+                    if (args[0].type === "Literal" && typeof args[0].value === "string") {
+                        parent.moduleName = args[0].value;
+                        args = args.slice(1);
+                    } else {
+                        parent.moduleName = "";
+                    }
+                    
+                    if (args[0].type === "ArrayExpression") {
+                        var containsOnlyStrings = args[0].reduce(function (prev, curr) {
+                            return prev && curr.type === "Literal" &&
+                                    typeof curr.value === "string";
+                        }, true);
+                        if (containsOnlyStrings) {
+                            dependencies = args[0];
+                            args.slice(1);
+                        }
+                    } else if (args[0].type === "ObjectExpression") {
+                        _buildExports(args[0], parent);
+                    }
+                    
+                    if (args.length === 1 && args[0].type === "FunctionExpression") {
+                        wrapper = args[0];
+                        if (dependencies) {
+                            if (dependencies.length === wrapper.params.length) {
+                                wrapper.params.forEach(function (param, index) {
+                                    _buildDependency(param, dependencies[index], parent);
+                                });
+                                // module definition provided by a return statement
+                                parent.moduleType = { direct: true };
+                            }
+                        } else if (wrapper.params.length === 3 &&
+                                wrapper.params[0].type === "Identifier" &&
+                                wrapper.params[0].name === REQUIRE &&
+                                wrapper.params[1].type === "Identifier" &&
+                                wrapper.params[1].name === EXPORTS &&
+                                wrapper.params[2].type === "Identifier" &&
+                                wrapper.params[2].name === MODULE) {
+                            // module definition provided by an exports object
+                            parent.moduleType = { exports: true };
+                        }
+                    }
+                }
+            }
+        }
 
         /*
          * Given a member expression, try to add a target-property association
@@ -158,6 +234,9 @@ define(function (require, exports, module) {
             case "ReturnStatement":
                 if (tree.argument) {
                     _buildScope(tree.argument, parent);
+                    if (parent) {
+                        _buildExports(tree.argument, parent.parent);
+                    }
                 }
                 break;
 
@@ -238,8 +317,15 @@ define(function (require, exports, module) {
                 _buildScope(tree.callee, parent);
                 break;
 
-            case "BinaryExpression":
             case "AssignmentExpression":
+                _buildScope(tree.left, parent);
+                _buildScope(tree.right, parent);
+                if (parent) {
+                    _buildDependency(tree.left, tree.right, parent);   
+                }
+                break;
+                    
+            case "BinaryExpression":
             case "LogicalExpression":
                 _buildScope(tree.left, parent);
                 _buildScope(tree.right, parent);
@@ -261,6 +347,8 @@ define(function (require, exports, module) {
                     _buildScope(t, parent);
                 });
                 _buildScope(tree.callee, parent);
+                _buildModule(tree);
+                    
                 break;
 
             case "FunctionExpression":
@@ -316,6 +404,8 @@ define(function (require, exports, module) {
             scope.propOccurrences = data.propOccurrences;
             scope.associations = data.associations;
             scope.literals = data.literals;
+            scope.dependencies = data.dependencies;
+            scope.exports = data.exports;
             scope.children = [];
 
             for (i = 0; i < data.children.length; i++) {
@@ -340,6 +430,8 @@ define(function (require, exports, module) {
             this.propOccurrences = [];
             this.associations = [];
             this.literals = [];
+            this.dependencies = [];
+            this.exports = [];
 
             this.children = []; // disjoint ranges, ordered by range start
             this.range = { start: obj.range[0], end: obj.range[1] };
@@ -395,6 +487,20 @@ define(function (require, exports, module) {
      */
     Scope.prototype.addLiteralOccurrence = function (lit) {
         this.literals.push(lit);
+    };
+    
+    /*
+     * Add a dependency
+     */
+    Scope.prototype.addDependency = function (dep) {
+        this.dependency.push(dep);
+    };
+    
+    /*
+     * Add an export
+     */
+    Scope.prototype.addExport = function (prop) {
+        this.exports.push(prop);
     };
 
     /*
