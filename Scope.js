@@ -36,7 +36,7 @@ define(function (require, exports, module) {
         
         function _buildExports(tree, parent) {
             if (parent) {
-                if (parent.moduleType && parent.moduleType.direct) {
+                if (parent.module && parent.module.type === "literal") {
                     if (tree.type === "ObjectExpression" && tree.properties) {
                         tree.properties.forEach(function (prop) {
                             parent.addExport(prop.key);
@@ -47,7 +47,25 @@ define(function (require, exports, module) {
         }
         
         function _buildDependency(left, right, parent) {
-            if (parent.)
+            if (parent) {
+                if (left.type === "Identifier") {
+                    if (parent.module && parent.module.type === "object" &&
+                            left.name === EXPORTS) {
+                        parent.addExport(left, right);
+                    }
+                    
+                    if (right.type === "CallExpression" &&
+                            right.callee &&
+                            right.callee.type === "Identifier" &&
+                            right.callee.name === REQUIRE &&
+                            right.params &&
+                            right.params.length === 1 &&
+                            right.params[0].type === "Literal" &&
+                            typeof right.params[0].value === "string") {
+                        parent.addDependency(left, right);
+                    }
+                }
+            }
         }
         
         function _buildModule(tree, parent) {
@@ -61,10 +79,10 @@ define(function (require, exports, module) {
             
                 if (args.length > 0) {
                     if (args[0].type === "Literal" && typeof args[0].value === "string") {
-                        parent.moduleName = args[0].value;
+                        parent.module = { name: args[0].value };
                         args = args.slice(1);
                     } else {
-                        parent.moduleName = "";
+                        parent.module = {};
                     }
                     
                     if (args[0].type === "ArrayExpression") {
@@ -85,10 +103,10 @@ define(function (require, exports, module) {
                         if (dependencies) {
                             if (dependencies.length === wrapper.params.length) {
                                 wrapper.params.forEach(function (param, index) {
-                                    _buildDependency(param, dependencies[index], parent);
+                                    parent.addDependency(param.name, dependencies[index].value);
                                 });
                                 // module definition provided by a return statement
-                                parent.moduleType = { direct: true };
+                                parent.module.type = "literal";
                             }
                         } else if (wrapper.params.length === 3 &&
                                 wrapper.params[0].type === "Identifier" &&
@@ -98,7 +116,7 @@ define(function (require, exports, module) {
                                 wrapper.params[2].type === "Identifier" &&
                                 wrapper.params[2].name === MODULE) {
                             // module definition provided by an exports object
-                            parent.moduleType = { exports: true };
+                            parent.module.type = "object";
                         }
                     }
                 }
@@ -321,7 +339,7 @@ define(function (require, exports, module) {
                 _buildScope(tree.left, parent);
                 _buildScope(tree.right, parent);
                 if (parent) {
-                    _buildDependency(tree.left, tree.right, parent);   
+                    _buildDependency(tree.left, tree.right, parent);
                 }
                 break;
                     
