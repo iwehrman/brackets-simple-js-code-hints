@@ -132,6 +132,8 @@
             properties      = parseObj ? siftPositions(scope, scope.walkDownProperties, "name") : [],
             literals        = parseObj ? siftPositions(scope, scope.walkDownLiterals, "value") : [],
             associations    = parseObj ? siftAssociations(scope, scope.walkDownAssociations) : [],
+            imports         = parseObj ? scope.imports : [],
+            exports         = parseObj ? scope.exports : [],
             response        = {
                 type            : self.SCOPE_MSG_TYPE,
                 dir             : dir,
@@ -143,6 +145,8 @@
                 properties      : self.annotateWithPath(properties, dir, file),
                 literals        : self.annotateLiterals(literals, "string"),
                 associations    : associations,
+                imports         : imports,
+                exports         : exports,
                 success         : !!parseObj
             };
 
@@ -170,7 +174,7 @@
             });
         } catch (err) {
             // _log("Parsing failed: " + err + " at " + err.index);
-            if (retries > 0) {
+            if (retries > 0 && err.lineNumber >= 0) {
                 var lines = text.split("\n"),
                     lineno = Math.min(lines.length, err.lineNumber) - 1,
                     newline,
