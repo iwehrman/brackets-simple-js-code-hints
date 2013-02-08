@@ -79,7 +79,13 @@ define(function (require, exports, module) {
                     literals        : null,
 
                     // all context-property associations found in this file
-                    associations    : null
+                    associations    : null,
+
+                    // imported resources and bindings for this file
+                    imports         : null,
+
+                    // exported resources for this file
+                    exports         : null
                 };
             }
         }
@@ -397,6 +403,8 @@ define(function (require, exports, module) {
                 state.properties = response.properties;
                 state.literals = response.literals;
                 state.associations = response.associations;
+                state.imports = response.imports;
+                state.exports = response.exports;
                 
                 state.dirtyScope = true;
 
