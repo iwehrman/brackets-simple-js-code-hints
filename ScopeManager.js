@@ -32,10 +32,12 @@ define(function (require, exports, module) {
         FileUtils               = brackets.getModule("file/FileUtils"),
         NativeFileSystem        = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
         ProjectManager          = brackets.getModule("project/ProjectManager"),
+        FileIndexManager        = brackets.getModule("project/FileIndexManager"),
         HintUtils               = require("HintUtils"),
         Scope                   = require("Scope").Scope;
 
     var pendingRequest      = null,     // information about a deferred scope request
+        resourceResolutions = {},       // resource name -> list of possible resolved file paths
         fileState           = {},       // directory -> file -> state
         outerScopeWorker    = (function () {
             var path = module.uri.substring(0, module.uri.lastIndexOf("/") + 1);
@@ -383,6 +385,39 @@ define(function (require, exports, module) {
      * Receive an outer scope object from the parser worker
      */
     function handleOuterScope(response) {
+        
+        function resolveImports(imports) {
+            var resourceName,
+                qualifiedResourceName;
+            
+            function handleFileInfos(infos) {
+                infos.forEach(function (info) {
+                    var fileName    = info.fullPath,
+                        index       = fileName.lastIndexOf(qualifiedResourceName);
+                    
+                    if (index === qualifiedResourceName.length - 1) {
+                        resourceResolutions[resourceName].push(fileName);
+                    }
+                });
+            }
+            
+            for (resourceName in imports) {
+                if (imports.hasOwnProperty(resourceName)) {
+                    if (!resourceResolutions.hasOwnProperty(resourceName)) {
+                        resourceResolutions[resourceName] = [];
+                        if (resourceName.lastIndexOf(".js") !== resourceName.length - 4) {
+                            qualifiedResourceName = resourceName + ".js";
+                        } else {
+                            qualifiedResourceName = resourceName;
+                        }
+                        // search FileIndexManager for possible resolutions
+                        FileIndexManager.getFileInfoList("js").done(handleFileInfos);
+                    }
+                    
+                }
+            }
+        }
+        
         var dir     = response.dir,
             file    = response.file,
             path    = dir + file,
