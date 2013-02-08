@@ -155,17 +155,6 @@ define(function (require, exports, module) {
                             }
                         }
                     }
-                    
-//                    if (wrapper.params.length === 3 &&
-//                            wrapper.params[0].type === "Identifier" &&
-//                            wrapper.params[0].name === MODULE_PARAM_REQUIRE &&
-//                            wrapper.params[1].type === "Identifier" &&
-//                            wrapper.params[1].name === MODULE_PARAM_EXPORTS &&
-//                            wrapper.params[2].type === "Identifier" &&
-//                            wrapper.params[2].name === MODULE_PARAM_MODULE) {
-//                        // module definition provided by an exports object
-//                        root.module.exportType = "object";
-//                    }
                 }
             }
         }
