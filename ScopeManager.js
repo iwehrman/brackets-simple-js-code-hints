@@ -35,89 +35,85 @@ define(function (require, exports, module) {
         HintUtils               = require("HintUtils"),
         Scope                   = require("Scope").Scope;
 
-    var pendingRequest      = null,  // information about a deferred scope request
-        allIdentifiers      = {},    // dir -> file -> list of identifiers for the given file
-        allGlobals          = {},    // dir -> file -> list of globals for the given file
-        allProperties       = {},    // dir -> file -> list of properties for the given file
-        allLiterals         = {},    // dir -> file -> list of literals for the given file
-        allAssociations     = {},    // dir -> file -> object-property associations for the given file
-        outerScope          = {},    // dir -> file -> outer-most scope for the given file
-        outerScopeDirty     = {},    // dir -> file -> has the given file changed since the last outer scope request? 
-        innerScopeDirty     = {},    // dir -> file -> has the outer scope for the given file changed since the last inner scope request?
-        outerWorkerActive   = {},    // dir -> file -> is the outer worker active for the given path? 
+    var pendingRequest      = null,     // information about a deferred scope request
+        fileState           = {},       // directory -> file -> state
         outerScopeWorker    = (function () {
             var path = module.uri.substring(0, module.uri.lastIndexOf("/") + 1);
             return new Worker(path + "parser-worker.js");
         }());
+
+    /* 
+     * Initialize state for a given directory and file name
+     */
+    function initFileState(dir, file) {
+        // initialize outerScope, etc. at dir
+        if (!fileState.hasOwnProperty(dir)) {
+            fileState[dir] = {};
+        }
+
+        if (file !== undefined) {
+            if (!fileState[dir].hasOwnProperty(file)) {
+                fileState[dir][file] = {
+                    // global scope object for this file
+                    scope           : null,
+
+                    // has the file changed since the scope was updated?
+                    dirtyFile       : true,
+
+                    // has the scope changed since the last inner scope request?
+                    dirtyScope      : true,
+
+                    // is the parser worker active for this file?
+                    active          : false,
+
+                    // all variable and parameter names defined in this file
+                    identifiers     : null,
+
+                    // all property names found in this file
+                    properties      : null,
+
+                    // all globals defined in this file
+                    globals         : null,
+
+                    // all string literals found in this file
+                    literals        : null,
+
+                    // all context-property associations found in this file
+                    associations    : null
+                };
+            }
+        }
+    }
+
+    function getFileState(dir, file) {
+        initFileState(dir, file);
+
+        if (file === undefined) {
+            return fileState[dir];
+        } else {
+            return fileState[dir][file];
+        }
+    }
 
     /**
      * Request a new outer scope object from the parser worker, if necessary
      */
     function refreshOuterScope(dir, file, text) {
 
-        /* 
-         * Initialize state maps for a given directory name and file name
-         */
-        function initializeFile(dir, file) {
-            // initialize outerScope, etc. at dir
-            if (!outerScope.hasOwnProperty(dir)) {
-                outerScope[dir] = {};
-            }
-            if (!innerScopeDirty.hasOwnProperty(dir)) {
-                innerScopeDirty[dir] = {};
-            }
-            if (!outerScopeDirty.hasOwnProperty(dir)) {
-                outerScopeDirty[dir] = {};
-            }
-            if (!outerWorkerActive.hasOwnProperty(dir)) {
-                outerWorkerActive[dir] = {};
-            }
-            if (!allGlobals.hasOwnProperty(dir)) {
-                allGlobals[dir] = {};
-            }
-            if (!allIdentifiers.hasOwnProperty(dir)) {
-                allIdentifiers[dir] = {};
-            }
-            if (!allProperties.hasOwnProperty(dir)) {
-                allProperties[dir] = {};
-            }
-            if (!allLiterals.hasOwnProperty(dir)) {
-                allLiterals[dir] = {};
-            }
-            if (!allAssociations.hasOwnProperty(dir)) {
-                allAssociations[dir] = {};
-            }
-
-            // initialize outerScope[dir], etc. at file
-            if (!outerScope[dir].hasOwnProperty(file)) {
-                outerScope[dir][file] = null;
-            }
-            if (!innerScopeDirty[dir].hasOwnProperty(file)) {
-                innerScopeDirty[dir][file] = true;
-            }
-            if (!outerScopeDirty[dir].hasOwnProperty(file)) {
-                outerScopeDirty[dir][file] = true;
-            }
-            if (!outerWorkerActive[dir].hasOwnProperty(file)) {
-                outerWorkerActive[dir][file] = false;
-            }
-        }
-
-        initializeFile(dir, file);
+        var state = getFileState(dir, file);
        
         // if there is not yet an outer scope or if the file has changed then
         // we might need to update the outer scope
-        if (outerScope[dir][file] === null || outerScopeDirty[dir][file]) {
-            if (!outerWorkerActive[dir][file]) {
-                // FIXME: we may want to debounce this call
+        if (state.scope === null || state.dirtyFile) {
+            if (!state.active) {
                 var path    = dir + file,
                     entry   = new NativeFileSystem.FileEntry(path);
                 
                 // the outer scope worker is about to be active
-                outerWorkerActive[dir][file] = true;
+                state.active = true;
                 
                 // the file will be clean since the last outer scope request
-                outerScopeDirty[dir][file] = false;
+                state.dirtyFile = false;
                 
                 // send text to the parser worker
                 outerScopeWorker.postMessage({
@@ -125,7 +121,7 @@ define(function (require, exports, module) {
                     dir         : dir,
                     file        : file,
                     text        : text,
-                    force       : !outerScope[dir][file]
+                    force       : !state.scope
                 });
             }
         }
@@ -149,13 +145,17 @@ define(function (require, exports, module) {
         /*
          * Combine a set of sets using the add operation
          */
-        function merge(sets, add) {
+        function merge(sets, property, add) {
             var combinedSet = {},
+                nextSet,
                 file;
 
             for (file in sets) {
                 if (sets.hasOwnProperty(file)) {
-                    add(combinedSet, sets[file]);
+                    nextSet = sets[file][property];
+                    if (nextSet) {
+                        add(combinedSet, nextSet);
+                    }
                 }
             }
 
@@ -178,10 +178,11 @@ define(function (require, exports, module) {
                 obj2.forEach(function (token) { addToObj(obj1, token); });
             }
             
-            var propobj = merge(allProperties[dir], addPropObjs),
-                proplist = [],
+            var stateMap    = getFileState(dir),
+                propobj     = merge(stateMap, "properties", addPropObjs),
+                proplist    = [],
                 propname;
-            
+
             for (propname in propobj) {
                 if (Object.prototype.hasOwnProperty.call(propobj, propname)) {
                     proplist.push(propobj[propname]);
@@ -194,7 +195,7 @@ define(function (require, exports, module) {
         /* 
          * Combine association objects from multiple files
          */
-        function mergeAssociations(dir, file) {
+        function mergeAssociations(dir) {
             function addAssocSets(list1, list2) {
                 var name;
 
@@ -222,12 +223,16 @@ define(function (require, exports, module) {
                     }
                 }
             }
-            
-            return merge(allAssociations[dir], addAssocSets);
+
+            var stateMap = getFileState(dir);
+
+            return merge(stateMap, "associations", addAssocSets);
         }
+
+        var state = getFileState(dir, file);
         
         // If there is no outer scope, the inner scope request is deferred. 
-        if (!outerScope[dir] || !outerScope[dir][file]) {
+        if (!state.scope) {
             if (pendingRequest && pendingRequest.deferred.state() === "pending") {
                 pendingRequest.deferred.reject();
             }
@@ -246,10 +251,10 @@ define(function (require, exports, module) {
             return { deferred: pendingRequest.deferred };
         } else {
             // The inner scope will be clean after this
-            innerScopeDirty[dir][file] = false;
+            state.dirtyScope = false;
             
             // Try to find an inner scope from the current outer scope
-            var innerScope = outerScope[dir][file].findChild(offset);
+            var innerScope = state.scope.findChild(offset);
             
             if (!innerScope) {
                 // we may have failed to find a child scope because a 
@@ -258,24 +263,24 @@ define(function (require, exports, module) {
                 // outer scope. Hence, if offset is greater than the range
                 // of the outerScope, we manually set innerScope to the
                 // outerScope
-                innerScope = outerScope[dir][file];
+                innerScope = state.scope;
             }
             
             // FIXME: This could be more efficient if instead of filtering
             // the entire list of identifiers we just used the identifiers
             // in the scope of innerScope, but that list doesn't have the
             // accumulated position information.
-            var scopedIdentifiers = filterByScope(allIdentifiers[dir][file], innerScope),
-                scopedProperties = mergeProperties(dir, file),
-                scopedAssociations = mergeAssociations(dir, file);
+            var identifiersForScope = filterByScope(state.identifiers, innerScope),
+                propertiesForFile = mergeProperties(dir),
+                associationsForFile = mergeAssociations(dir);
             
             return {
                 scope: innerScope,
-                identifiers: scopedIdentifiers,
-                globals: allGlobals[dir][file],
-                properties: scopedProperties,
-                literals: allLiterals[dir][file],
-                associations: scopedAssociations
+                identifiers: identifiersForScope,
+                globals: state.globals,
+                literals: state.literals,
+                properties: propertiesForFile,
+                associations: associationsForFile
             };
         }
     }
@@ -301,9 +306,10 @@ define(function (require, exports, module) {
         var path    = document.file.fullPath,
             split   = HintUtils.splitPath(path),
             dir     = split.dir,
-            file    = split.file;
+            file    = split.file,
+            state   = getFileState(dir, file);
         
-        return innerScopeDirty[dir][file];
+        return state.dirtyScope;
     }
 
     /**
@@ -311,10 +317,9 @@ define(function (require, exports, module) {
      * a reparse request. 
      */
     function markFileDirty(dir, file) {
-        if (!outerScopeDirty.hasOwnProperty(dir)) {
-            outerScopeDirty[dir] = {};
-        }
-        outerScopeDirty[dir][file] = true;
+        var state = getFileState(dir, file);
+
+        state.dirtyFile = true;
     }
 
     /**
@@ -372,29 +377,30 @@ define(function (require, exports, module) {
      * Receive an outer scope object from the parser worker
      */
     function handleOuterScope(response) {
-        
         var dir     = response.dir,
             file    = response.file,
             path    = dir + file,
+            state   = getFileState(dir, file),
             scopeInfo;
 
-        if (outerWorkerActive[dir][file]) {
-            outerWorkerActive[dir][file] = false;
+        if (state.active) {
+            state.active = false;
             if (response.success) {
-                outerScope[dir][file] = new Scope(response.scope);
+                state.scope = new Scope(response.scope);
                 
                 // The outer scope should cover the entire file
-                outerScope[dir][file].range.start = 0;
-                outerScope[dir][file].range.end = response.length;
-                
-                allGlobals[dir][file] = response.globals;
-                allIdentifiers[dir][file] = response.identifiers;
-                allProperties[dir][file] = response.properties;
-                allLiterals[dir][file] = response.literals;
-                allAssociations[dir][file] = response.associations;
-                innerScopeDirty[dir][file] = true;
+                state.scope.range.start = 0;
+                state.scope.range.end = response.length;
 
-                if (outerScopeDirty[dir][file]) {
+                state.globals = response.globals;
+                state.identifiers = response.identifiers;
+                state.properties = response.properties;
+                state.literals = response.literals;
+                state.associations = response.associations;
+                
+                state.dirtyScope = true;
+
+                if (state.dirtyFile) {
                     DocumentManager.getDocumentForPath(path).done(function (document) {
                         refreshOuterScope(dir, file, document.getText());
                     });
@@ -431,15 +437,7 @@ define(function (require, exports, module) {
     $(ProjectManager)
         .on(HintUtils.eventName("beforeProjectClose"),
             function (event, projectRoot) {
-                allGlobals          = {};
-                allIdentifiers      = {};
-                allProperties       = {};
-                allLiterals         = {};
-                allAssociations     = {};
-                outerScope          = {};
-                outerScopeDirty     = {};
-                innerScopeDirty     = {};
-                outerWorkerActive   = {};
+                fileState = {};
             });
     
     // relocate scope information on file rename
@@ -462,19 +460,11 @@ define(function (require, exports, module) {
                             obj[newdir] = {};
                         }
                         obj[newdir][newfile] = obj[olddir][oldfile];
-                        obj[olddir][oldfile] = null;
+                        delete obj[olddir][oldfile];
                     }
                 }
                 
-                moveProp(outerScope);
-                moveProp(outerScopeDirty);
-                moveProp(innerScopeDirty);
-                moveProp(outerWorkerActive);
-                moveProp(allGlobals);
-                moveProp(allIdentifiers);
-                moveProp(allProperties);
-                moveProp(allLiterals);
-                moveProp(allAssociations);
+                moveProp(fileState);
             });
     
     exports.handleEditorChange = handleEditorChange;
