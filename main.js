@@ -41,10 +41,14 @@ define(function (require, exports, module) {
         cachedScope         = null,  // the inner-most scope returned by the query worker
         cachedLine          = null;  // the line number for the cached scope
 
+    var MAX_DISPLAYED_HINTS = 100;
+
     /**
-     * Creates a hint response object
+     * Creates a hint response object. Filters the hint list using the query
+     * string, formats the hints for display, and returns a hint response
+     * object according to the CodeHintManager's API for code hint providers.
      */
-    function getResponse(hints, query) {
+    function getHintResponse(hints, query) {
 
         var trimmedQuery,
             filteredHints,
@@ -97,7 +101,7 @@ define(function (require, exports, module) {
                     }
                 }, limit);
             } else {
-                return tokens.splice(0, 100);
+                return tokens.splice(0, limit);
             }
         }
 
@@ -174,7 +178,7 @@ define(function (require, exports, module) {
             trimmedQuery = query;
         }
 
-        filteredHints = filterWithQuery(hints, 100);
+        filteredHints = filterWithQuery(hints, MAX_DISPLAYED_HINTS);
         formattedHints = formatHints(filteredHints, trimmedQuery);
 
         return {
@@ -247,7 +251,7 @@ define(function (require, exports, module) {
 
                             if ($deferredHints.state() === "pending") {
                                 var query           = session.getQuery(),
-                                    hintResponse    = getResponse(cachedHints, query);
+                                    hintResponse    = getHintResponse(cachedHints, query);
 
                                 $deferredHints.resolveWith(null, [hintResponse]);
                                 $(self).triggerHandler("hintResponse", [query]);
@@ -279,7 +283,7 @@ define(function (require, exports, module) {
                         cachedType = type;
                         cachedHints = session.getHints();
                     }
-                    return getResponse(cachedHints, query);
+                    return getHintResponse(cachedHints, query);
                 }
             }
         }
