@@ -204,14 +204,14 @@ define(function (require, exports, module) {
             // don't autocomplete within strings or comments, etc.
             if (token && HintUtils.hintable(token)) {
                 var offset      = session.getOffset(),
-                    line        = session.getCursor().line,
-                    scopeInfo;
+                    line        = session.getCursor().line;
                 
                 $(this).triggerHandler("beginHintSession", [key]);
                 
                 // Invalidate cached information if: 1) no scope exists; 2) the
                 // cursor has moved a line; 3) the scope is dirty; or 4) if the
-                // cursor has moved into a different scope.
+                // cursor has moved into a different scope. Cached information
+                // is also reset on editor change.
                 if (!cachedScope ||
                         cachedLine !== line ||
                         ScopeManager.isScopeDirty(session.editor.document) ||
@@ -354,7 +354,7 @@ define(function (require, exports, module) {
          * When the editor is changed, reset the hinting session and cached 
          * information, and reject any pending deferred requests.
          */
-        function handleEditorChange(editor) {
+        function initializeSession(editor) {
             ScopeManager.handleEditorChange(editor.document);
             session = new Session(editor);
             cachedScope = null;
@@ -370,9 +370,9 @@ define(function (require, exports, module) {
             if (!editor) {
                 return;
             }
-
+            
             if (editor.getModeForSelection() === HintUtils.MODE_NAME) {
-                handleEditorChange(editor);
+                initializeSession(editor);
                 $(editor)
                     .on(HintUtils.eventName("change"), function () {
                         ScopeManager.handleFileChange(editor.document);
@@ -388,13 +388,20 @@ define(function (require, exports, module) {
                 .off(HintUtils.eventName("change"));
         }
 
+        /*
+         * Handle the activeEditorChange event fired by EditorManager.
+         * Uninstalls the change listener on the previous editor
+         * and installs a change listener on the new editor.
+         */
+        function handleActiveEditorChange(event, current, previous) {
+            uninstallEditorListeners(previous);
+            installEditorListeners(current);
+        }
+
         // uninstall/install change listener as the active editor changes
         $(EditorManager)
             .on(HintUtils.eventName("activeEditorChange"),
-                function (event, current, previous) {
-                    uninstallEditorListeners(previous);
-                    installEditorListeners(current);
-                });
+                handleActiveEditorChange);
         
         // immediately install the current editor
         installEditorListeners(EditorManager.getActiveEditor());
@@ -406,6 +413,6 @@ define(function (require, exports, module) {
 
         // for unit testing
         exports.jsHintProvider = jsHints;
-        exports.handleEditorChange = handleEditorChange;
+        exports.initializeSession = initializeSession;
     });
 });
