@@ -223,26 +223,65 @@ define(function (require, exports, module) {
             
             /*
              * Compute the minimum distance between a token, with which is 
-             * associated a list of positions, and a given offset
+             * associated a sorted list of positions, and a given offset.
              */
-            function mindist(pos, t) {
-                var dist = t.positions.length ? Math.abs(t.positions[0] - pos) : Infinity,
-                    i,
-                    tmp;
+            function mindist(pos, token) {
+                var arr     = token.positions,
+                    low     = 0,
+                    high    = arr.length,
+                    middle  = Math.floor(high / 2),
+                    dist;
 
-                for (i = 1; i < t.positions.length; i++) {
-                    tmp = Math.abs(t.positions[i] - pos);
-                    if (tmp < dist) {
-                        dist = tmp;
+                if (high === 0) {
+                    return Infinity;
+                } else {
+                    // binary search for the position
+                    while (low < middle && middle < high) {
+                        if (arr[middle] < pos) {
+                            low = middle;
+                            middle += Math.floor((high - middle) / 2);
+                        } else if (arr[middle] > pos) {
+                            high = middle;
+                            middle = low + Math.floor((middle - low) / 2);
+                        } else {
+                            break;
+                        }
                     }
+
+                    // the closest position is off by no more than one
+                    dist = Math.abs(arr[middle] - pos);
+                    if (middle > 0) {
+                        dist = Math.min(dist, Math.abs(arr[middle - 1] - pos));
+                    }
+                    if (middle + 1 < arr.length) {
+                        dist = Math.min(dist, Math.abs(arr[middle + 1] - pos));
+                    }
+                    return dist;
                 }
-                return dist;
             }
 
             return function (a, b) {
-                var adist = mindist(pos, a),
-                    bdist = mindist(pos, b);
                 
+                /*
+                 * Lookup the cached minimum distance from an occurrence of the
+                 * token to the given position, calculating and storing it if
+                 * needed.
+                 */
+                function getDistToPos(token) {
+                    var dist;
+
+                    if (token.distToPos >= 0) {
+                        dist = token.distToPos;
+                    } else {
+                        dist = mindist(pos, token);
+                        token.distToPos = dist;
+                    }
+                    return dist;
+                }
+
+                var adist = getDistToPos(a),
+                    bdist = getDistToPos(b);
+
                 if (adist === Infinity) {
                     if (bdist === Infinity) {
                         return 0;
@@ -414,7 +453,7 @@ define(function (require, exports, module) {
             hints = hints.concat(this.builtinLiterals);
             hints = hints.concat(this.keywords);
         }
-        
+
         return hints;
     };
 
