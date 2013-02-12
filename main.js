@@ -214,7 +214,7 @@ define(function (require, exports, module) {
                 // cursor has moved into a different scope.
                 if (!cachedScope ||
                         cachedLine !== line ||
-                        ScopeManager.isScopeDirty(session.editor.document, offset) ||
+                        ScopeManager.isScopeDirty(session.editor.document) ||
                         !cachedScope.containsPositionImmediate(offset)) {
                     cachedScope = null;
                     cachedLine = null;
