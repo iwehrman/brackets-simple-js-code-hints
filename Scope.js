@@ -363,7 +363,7 @@ define(function (require, exports, module) {
      */
     Scope.prototype.addDeclaration = function (id) {
         this.idDeclarations.push(id);
-        this.addIdOccurrence(this);
+        this.addIdOccurrence(id);
     };
     
     /*
