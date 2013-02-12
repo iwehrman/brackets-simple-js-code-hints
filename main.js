@@ -72,7 +72,7 @@ define(function (require, exports, module) {
                     }
                 }
 
-                return results.reverse();
+                return results;
             }
 
             // If the query is a string literal (i.e., if it starts with a
