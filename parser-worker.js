@@ -43,7 +43,8 @@
         var occurrences,
             results = [],
             key,
-            token;
+            token,
+            comparator = function (a, b) { return a - b; };
 
         occurrences = walk.call(scope, function (acc, token) {
             if (Object.prototype.hasOwnProperty.call(acc, token[keyProp])) {
@@ -56,7 +57,7 @@
 
         for (key in occurrences) {
             if (Object.prototype.hasOwnProperty.call(occurrences, key)) {
-                token = self.makeToken(key, occurrences[key]);
+                token = self.makeToken(key, occurrences[key].sort(comparator));
                 results.push(token);
             }
         }
