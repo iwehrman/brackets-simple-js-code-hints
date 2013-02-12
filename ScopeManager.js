@@ -302,7 +302,7 @@ define(function (require, exports, module) {
      * Is the inner scope dirty? (It is if the outer scope has changed since
      * the last inner scope request)
      */
-    function isScopeDirty(document, offset) {
+    function isScopeDirty(document) {
         var path    = document.file.fullPath,
             split   = HintUtils.splitPath(path),
             dir     = split.dir,
