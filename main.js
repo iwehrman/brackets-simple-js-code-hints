@@ -54,7 +54,27 @@ define(function (require, exports, module) {
         /*
          * Filter a list of tokens using a given query string
          */
-        function filterWithQuery(tokens) {
+        function filterWithQuery(tokens, limit) {
+
+            /*
+             * Filter arr using test, returning at most limit results from the
+             * front of the array.
+             */
+            function filterArrayPrefix(arr, test, limit) {
+                var i = 0,
+                    results = [],
+                    elem;
+
+                for (i; i < arr.length && results.length <= limit; i++) {
+                    elem = arr[i];
+                    if (test(elem)) {
+                        results.push(elem);
+                    }
+                }
+
+                return results.reverse();
+            }
+
             // If the query is a string literal (i.e., if it starts with a
             // string literal delimiter, and hence if trimmedQuery !== query)
             // then only string literal hints should be returned, and matching
@@ -62,21 +82,21 @@ define(function (require, exports, module) {
             // otherwise non-empty, no string literals should match. If the
             // query is empty then no hints are filtered.
             if (trimmedQuery !== query) {
-                return tokens.filter(function (token) {
+                return filterArrayPrefix(tokens, function (token) {
                     if (token.literal && token.kind === "string") {
                         return (token.value.indexOf(trimmedQuery) === 0);
                     } else {
                         return false;
                     }
-                });
+                }, limit);
             } else if (query.length > 0) {
-                return tokens.filter(function (token) {
+                return filterArrayPrefix(tokens, function (token) {
                     if (token.literal && token.kind === "string") {
                         return false;
                     } else {
                         return (token.value.indexOf(query) === 0);
                     }
-                });
+                }, limit);
             } else {
                 return tokens;
             }
@@ -155,7 +175,7 @@ define(function (require, exports, module) {
             trimmedQuery = query;
         }
 
-        filteredHints = filterWithQuery(hints).slice(0, 100);
+        filteredHints = filterWithQuery(hints, 100);
         formattedHints = formatHints(filteredHints, trimmedQuery);
 
         return {
