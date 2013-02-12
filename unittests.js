@@ -159,7 +159,7 @@ define(function (require, exports, module) {
                 // create Editor instance (containing a CodeMirror instance)
                 runs(function () {
                     testEditor = createMockEditor(testDoc, "javascript");
-                    JSCodeHints.handleEditorChange(testEditor);
+                    JSCodeHints.initializeSession(testEditor);
                 });
             });
             
