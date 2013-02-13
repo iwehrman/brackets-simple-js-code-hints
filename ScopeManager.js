@@ -386,8 +386,8 @@ define(function (require, exports, module) {
         if (state.active) {
             state.active = false;
             if (response.success) {
-                state.scope = new Scope(response.scope);
-                
+                state.scope = Scope.rebuild(response.scope);
+
                 // The outer scope should cover the entire file
                 state.scope.range.start = 0;
                 state.scope.range.end = response.length;

@@ -27,7 +27,7 @@
 define(function (require, exports, module) {
     "use strict";
 
-    function Scope(obj, parent) {
+    function Scope(tree, parent) {
 
         /*
          * Given a member expression, try to add a target-property association
@@ -303,53 +303,54 @@ define(function (require, exports, module) {
             }
         }
         
-        /*
-         * Build a scope object from an object that has all the necessary data
-         * but the wrong prototype. Such objects may be created as a result of
-         * e.g., JSON-marshalling and unmarshalling a scope.
-         */
-        function _rebuildScope(scope, data) {
-            var child, i;
-            scope.range = data.range;
-            scope.idDeclarations = data.idDeclarations;
-            scope.idOccurrences = data.idOccurrences;
-            scope.propOccurrences = data.propOccurrences;
-            scope.associations = data.associations;
-            scope.literals = data.literals;
-            scope.children = [];
-
-            for (i = 0; i < data.children.length; i++) {
-                child = new Scope(data.children[i], scope);
-                scope.children.push(child);
-            }
-        }
-        
         if (parent === undefined) {
             this.parent = null;
         } else {
             this.parent = parent;
         }
 
-        if (obj.idDeclarations && obj.range) {
-            // the object is a data-only Scope object
-            _rebuildScope(this, obj);
-        } else {
-            // the object is an AST
-            this.idDeclarations = [];
-            this.idOccurrences = [];
-            this.propOccurrences = [];
-            this.associations = [];
-            this.literals = [];
+        this.idDeclarations = [];
+        this.idOccurrences = [];
+        this.propOccurrences = [];
+        this.associations = [];
+        this.literals = [];
 
-            this.children = []; // disjoint ranges, ordered by range start
-            this.range = { start: obj.range[0], end: obj.range[1] };
-        
-            // if parent is null, walk the AST 
-            if (!this.parent) {
-                _buildScope(obj, this);
-            }
+        this.children = []; // disjoint ranges, ordered by range start
+        this.range = {
+            start: tree.range[0],
+            end: tree.range[1]
+        };
+
+        // if parent is null, walk the AST
+        if (!this.parent) {
+            _buildScope(tree, this);
         }
     }
+
+    /*
+     * Rebuild a Scope object from an object that has all the necessary data
+     * but the wrong prototype. Such objects may be created as a result of
+     * e.g., JSON-marshalling and unmarshalling a scope.
+     */
+    Scope.rebuild = function (data) {
+        var memberName,
+            member;
+
+        for (memberName in Scope.prototype) {
+            if (Scope.prototype.hasOwnProperty(memberName)) {
+                member = Scope.prototype[memberName];
+                if (typeof member === "function") {
+                    data[memberName] = member;
+                }
+            }
+        }
+
+        data.children.forEach(function (child) {
+            Scope.rebuild(child);
+        });
+
+        return data;
+    };
 
     /* 
      * Add an identifier occurrence.
