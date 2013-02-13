@@ -30,6 +30,7 @@ define(function (require, exports, module) {
     var CodeHintManager = brackets.getModule("editor/CodeHintManager"),
         EditorManager   = brackets.getModule("editor/EditorManager"),
         AppInit         = brackets.getModule("utils/AppInit"),
+        ExtensionUtils  = brackets.getModule("utils/ExtensionUtils"),
         StringUtils     = brackets.getModule("utils/StringUtils"),
         HintUtils       = require("HintUtils"),
         ScopeManager    = require("ScopeManager"),
@@ -112,30 +113,30 @@ define(function (require, exports, module) {
             return hints.map(function (token) {
                 var hint        = token.value,
                     index       = hint.indexOf(query),
-                    $hintObj    = $('<span>'),
+                    $hintObj    = $("<span>").addClass("brackets-js-hints"),
                     delimiter   = "";
 
                 // level indicates either variable scope or property confidence
                 switch (token.level) {
                 case 0:
-                    $hintObj.css('color', 'rgb(0,100,0)'); // green
+                    $hintObj.addClass("priority-high");
                     break;
                 case 1:
-                    $hintObj.css('color', 'rgb(125,125,0)'); // yellow
+                    $hintObj.addClass("priority-medium");
                     break;
                 case 2:
-                    $hintObj.css('color', 'rgb(0,0,100)'); // blue
+                    $hintObj.addClass("priority-low");
                     break;
                 }
 
                 // is the token a global variable?
                 if (token.global) {
-                    $hintObj.css('font-style', 'italic');
+                    $hintObj.addClass("global-hint");
                 }
                 
                 // is the token a literal?
                 if (token.literal) {
-                    $hintObj.css('color', 'rgb(50,50,50)'); // grey
+                    $hintObj.addClass("literal-hint");
                     if (token.kind === "string") {
                         delimiter = HintUtils.DOUBLE_QUOTE;
                     }
@@ -143,7 +144,7 @@ define(function (require, exports, module) {
                 
                 // is the token a keyword?
                 if (token.keyword) {
-                    $hintObj.css('font-family', 'monospace');
+                    $hintObj.addClass("keyword-hint");
                 }
              
                 // higlight the matched portion of each hint
@@ -153,14 +154,14 @@ define(function (require, exports, module) {
                         suffix  = StringUtils.htmlEscape(hint.slice(index + query.length));
 
                     $hintObj.append(delimiter + prefix)
-                        .append($('<span>')
+                        .append($("<span>")
                                 .append(match)
-                                .css('font-weight', 'bold'))
+                                .addClass("matched-hint"))
                         .append(suffix + delimiter);
                 } else {
                     $hintObj.text(delimiter + hint + delimiter);
                 }
-                $hintObj.data('token', token);
+                $hintObj.data("token", token);
                 
                 return $hintObj;
             });
@@ -392,7 +393,9 @@ define(function (require, exports, module) {
             uninstallEditorListeners(previous);
             installEditorListeners(current);
         }
-
+        
+        ExtensionUtils.loadStyleSheet(module, "styles/brackets-js-hints.css");
+        
         // uninstall/install change listener as the active editor changes
         $(EditorManager)
             .on(HintUtils.eventName("activeEditorChange"),
