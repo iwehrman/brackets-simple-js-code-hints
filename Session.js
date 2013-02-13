@@ -37,8 +37,6 @@ define(function (require, exports, module) {
     function Session(editor) {
         this.editor = editor;
         this.path = editor.document.file.fullPath;
-        this.keywords = HintUtils.KEYWORDS;
-        this.builtinLiterals = HintUtils.LITERALS;
     }
 
     /**
@@ -79,28 +77,32 @@ define(function (require, exports, module) {
     };
 
     /**
-     * Get the token at the current cursor position
+     * Get the token at the given cursor position, or at the current cursor
+     * if none is given.
      */
-    Session.prototype.getCurrentToken = function () {
-        var cm      = this.editor._codeMirror,
-            cursor  = this.getCursor();
-            
-        return cm.getTokenAt(cursor);
+    Session.prototype.getToken = function (cursor) {
+        var cm = this.editor._codeMirror;
+
+        if (cursor) {
+            return cm.getTokenAt(cursor);
+        } else {
+            return cm.getTokenAt(this.getCursor());
+        }
     };
     
     /**
-     * Get the token after the one at the given cursor on the same line, if one
-     * exists.
+     * Get the next cursor position on the line, or null if there isn't one.
      */
-    Session.prototype.getNextToken = function () {
-        var cm      = this.editor._codeMirror,
-            cursor  = this.getCursor(),
+    Session.prototype.getNextCursorOnLine = function () {
+        var cursor  = this.getCursor(),
             doc     = this.editor.document,
             line    = doc.getLine(cursor.line);
 
         if (cursor.ch < line.length) {
-            return cm.getTokenAt({ch: cursor.ch + 1,
-                                  line: cursor.line});
+            return {
+                ch  : cursor.ch + 1,
+                line: cursor.line
+            };
         } else {
             return null;
         }
@@ -110,9 +112,9 @@ define(function (require, exports, module) {
      * Get the token before the one at the given cursor
      */
     Session.prototype._getPreviousToken = function (cursor) {
-        var token   = this.editor._codeMirror.getTokenAt(cursor),
-            doc     = this.editor.document,
-            prev    = token;
+        var token   = this.getToken(cursor),
+            prev    = token,
+            doc;
 
         do {
             if (prev.start < cursor.ch) {
@@ -120,12 +122,13 @@ define(function (require, exports, module) {
             } else if (prev.start > 0) {
                 cursor.ch = prev.start - 1;
             } else if (cursor.line > 0) {
+                doc = this.editor.document;
                 cursor.ch = doc.getLine(cursor.line - 1).length;
                 cursor.line--;
             } else {
                 break;
             }
-            prev = this.editor._codeMirror.getTokenAt(cursor);
+            prev = this.getToken(cursor);
         } while (prev.string.trim() === "");
         
         return prev;
@@ -137,7 +140,7 @@ define(function (require, exports, module) {
      */
     Session.prototype.getQuery = function () {
         var cursor  = this.getCursor(),
-            token   = this.getCurrentToken(),
+            token   = this.getToken(cursor),
             query   = "";
         
         if (token) {
@@ -154,8 +157,7 @@ define(function (require, exports, module) {
      * foo(bar, baz(quux)).prop, foo is the context.
      */
     Session.prototype.getContext = function (cursor, depth) {
-        var cm          = this.editor._codeMirror,
-            token       = cm.getTokenAt(cursor);
+        var token = this.getToken(cursor);
 
         if (depth === undefined) {
             depth = 0;
@@ -185,7 +187,7 @@ define(function (require, exports, module) {
         var propertyLookup  = false,
             context         = null,
             cursor          = this.getCursor(),
-            token           = this.getCurrentToken();
+            token           = this.getToken(cursor);
 
         if (token) {
             if (token.string === ".") {
@@ -450,8 +452,8 @@ define(function (require, exports, module) {
             hints = hints.concat(this.literals);
             hints.sort(compareIdentifiers(offset));
             hints = hints.concat(this.globals);
-            hints = hints.concat(this.builtinLiterals);
-            hints = hints.concat(this.keywords);
+            hints = hints.concat(HintUtils.LITERALS);
+            hints = hints.concat(HintUtils.KEYWORDS);
         }
 
         return hints;

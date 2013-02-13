@@ -27,19 +27,19 @@
 define(function (require, exports, module) {
     "use strict";
 
-    var CodeHintManager         = brackets.getModule("editor/CodeHintManager"),
-        EditorManager           = brackets.getModule("editor/EditorManager"),
-        AppInit                 = brackets.getModule("utils/AppInit"),
-        StringUtils             = brackets.getModule("utils/StringUtils"),
-        HintUtils               = require("HintUtils"),
-        ScopeManager            = require("ScopeManager"),
-        Session                 = require("Session");
+    var CodeHintManager = brackets.getModule("editor/CodeHintManager"),
+        EditorManager   = brackets.getModule("editor/EditorManager"),
+        AppInit         = brackets.getModule("utils/AppInit"),
+        StringUtils     = brackets.getModule("utils/StringUtils"),
+        HintUtils       = require("HintUtils"),
+        ScopeManager    = require("ScopeManager"),
+        Session         = require("Session");
 
-    var session             = null,  // object that encapsulates the current session state
-        cachedHints         = null,  // sorted hints for the current hinting session
-        cachedType          = null,  // describes the lookup type and the object context
-        cachedScope         = null,  // the inner-most scope returned by the query worker
-        cachedLine          = null;  // the line number for the cached scope
+    var session     = null,  // object that encapsulates the current session state
+        cachedHints = null,  // sorted hints for the current hinting session
+        cachedType  = null,  // describes the lookup type and the object context
+        cachedScope = null,  // the inner-most scope returned by the query worker
+        cachedLine  = null;  // the line number for the cached scope
 
     var MAX_DISPLAYED_HINTS = 100;
 
@@ -199,19 +199,19 @@ define(function (require, exports, module) {
      */
     JSHints.prototype.hasHints = function (editor, key) {
         if ((key === null) || HintUtils.maybeIdentifier(key)) {
-            var token = session.getCurrentToken();
+            var cursor  = session.getCursor(),
+                token   = session.getToken(cursor);
 
             // don't autocomplete within strings or comments, etc.
             if (token && HintUtils.hintable(token)) {
-                var offset      = session.getOffset(),
-                    line        = session.getCursor().line;
+                var offset = session.getOffset();
                 
                 // Invalidate cached information if: 1) no scope exists; 2) the
                 // cursor has moved a line; 3) the scope is dirty; or 4) if the
                 // cursor has moved into a different scope. Cached information
                 // is also reset on editor change.
                 if (!cachedScope ||
-                        cachedLine !== line ||
+                        cachedLine !== cursor.line ||
                         ScopeManager.isScopeDirty(session.editor.document) ||
                         !cachedScope.containsPositionImmediate(offset)) {
                     cachedScope = null;
@@ -229,7 +229,8 @@ define(function (require, exports, module) {
       * context
       */
     JSHints.prototype.getHints = function (key) {
-        var token = session.getCurrentToken();
+        var cursor = session.getCursor(),
+            token = session.getToken(cursor);
         if ((key === null) || HintUtils.maybeIdentifier(token.string)) {
             if (token && HintUtils.hintable(token)) {
 
@@ -243,7 +244,7 @@ define(function (require, exports, module) {
                         scopeResponse.promise.done(function (scopeInfo) {
                             session.setScopeInfo(scopeInfo);
                             cachedScope = scopeInfo.scope;
-                            cachedLine = session.getCursor().line;
+                            cachedLine = cursor.line;
                             cachedType = session.getType();
                             cachedHints = session.getHints();
 
@@ -267,7 +268,7 @@ define(function (require, exports, module) {
                     } else {
                         session.setScopeInfo(scopeResponse);
                         cachedScope = scopeResponse.scope;
-                        cachedLine = session.getCursor().line;
+                        cachedLine = cursor.line;
                     }
                 }
 
@@ -300,14 +301,16 @@ define(function (require, exports, module) {
         var hint        = $hintObj.data('token'),
             completion  = hint.value,
             cursor      = session.getCursor(),
-            token       = session.getCurrentToken(),
+            token       = session.getToken(cursor),
             query       = session.getQuery(),
             start       = {line: cursor.line, ch: cursor.ch - query.length},
             end         = {line: cursor.line, ch: (token ? token.end : cursor.ch)},
             delimeter;
 
         if (token && token.string === ".") {
-            var nextToken = session.getNextToken();
+            var nextCursor  = session.getNextCursorOnLine(),
+                nextToken   = nextCursor ? session.getToken(nextCursor) : null;
+
             if (nextToken && // don't replace delimiters, etc.
                     HintUtils.maybeIdentifier(nextToken.string) &&
                     HintUtils.hintable(nextToken)) {
