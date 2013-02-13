@@ -235,12 +235,12 @@ define(function (require, exports, module) {
 
                 if (!cachedScope) {
                     var offset          = session.getOffset(),
-                        scopeResponse   = ScopeManager.getScope(session.editor.document, offset),
+                        scopeResponse   = ScopeManager.getScopeInfo(session.editor.document, offset),
                         self            = this;
 
-                    if (scopeResponse.hasOwnProperty("deferred")) {
+                    if (scopeResponse.hasOwnProperty("promise")) {
                         var $deferredHints = $.Deferred();
-                        scopeResponse.deferred.done(function (scopeInfo) {
+                        scopeResponse.promise.done(function (scopeInfo) {
                             session.setScopeInfo(scopeInfo);
                             cachedScope = scopeInfo.scope;
                             cachedLine = session.getCursor().line;

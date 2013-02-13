@@ -255,7 +255,7 @@ define(function (require, exports, module) {
             DocumentManager.getDocumentForPath(dir + file).done(function (document) {
                 refreshOuterScope(dir, file, document.getText());
             });
-            return { deferred: pendingRequest.deferred };
+            return { promise: pendingRequest.deferred.promise() };
         } else {
             // The inner scope will be clean after this
             state.dirtyScope = false;
@@ -293,10 +293,16 @@ define(function (require, exports, module) {
     }
     
     /**
-     * Get a new inner scope, if possible. If there is no outer scope for the
-     * given file, a deferred scope will be returned instead.
+     * Get a new inner scope and related info, if possible. If there is no
+     * outer scope for the given file, a deferred object will be returned
+     * instead.
+     *
+     * Note that successive calls to getScope may return the same objects, so
+     * clients that wish to modify those objects (e.g., by annotating them based
+     * on some temporary context) should copy them first. See, e.g.,
+     * Session.getHints().
      */
-    function getScope(document, offset) {
+    function getScopeInfo(document, offset) {
         var path    = document.file.fullPath,
             split   = HintUtils.splitPath(path),
             dir     = split.dir,
@@ -476,7 +482,7 @@ define(function (require, exports, module) {
     
     exports.handleEditorChange = handleEditorChange;
     exports.handleFileChange = handleFileChange;
-    exports.getScope = getScope;
+    exports.getScopeInfo = getScopeInfo;
     exports.isScopeDirty = isScopeDirty;
 
 });
