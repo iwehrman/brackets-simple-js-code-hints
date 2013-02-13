@@ -628,5 +628,5 @@ define(function (require, exports, module) {
         }).join(", ") + this.range.end + "]";
     };
 
-    exports.Scope = Scope;
+    module.exports = Scope;
 });

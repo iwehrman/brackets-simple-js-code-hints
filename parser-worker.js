@@ -24,12 +24,52 @@
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50, regexp: true */
 /*global self, importScripts, esprima, setTimeout */
 
+/**
+ * Loads a file that contains an AMD module definition using the web worker
+ * importScripts global function.
+ *
+ * @param {String} url - The URL of the module to load
+ */
+function require(url) {
+    "use strict";
+
+    /*
+     * The following function is called by AMD modules when loaded with
+     * importScripts. CommonJS-style modules will only pass a wrapper function
+     * as a single argument; proper AMD-style modules may additionally pass an
+     * array of bindings, which are ignored. In the former case, the wrapper
+     * function expects require, exports and module arguments; in the latter
+     * case, the wrapper function expects only an exports arguments.
+     */
+    self.define = function (bindings, wrapper) {
+        var module = { exports: {} },
+            require = null;
+
+        if (typeof bindings === "function") {
+            wrapper = bindings;
+        } else {
+            require = module.exports;
+        }
+
+        wrapper(require, module.exports, module);
+        self.exports = module.exports;
+    };
+    self.define.amd = true;
+
+    importScripts(url);
+    var exports = self.exports;
+    delete self.exports;
+    return exports;
+}
+
 (function () {
-    'use strict';
+    "use strict";
+
+    var Scope       = require("Scope.js"),
+        HintUtils   = require('HintUtils.js'),
+        esprima     = require('esprima/esprima.js');
 
     var MAX_RETRIES = 100;
-
-    importScripts('esprima/esprima.js', 'Scope.js', 'HintUtils.js');
 
     function _log(msg) {
         self.postMessage({log: msg });
@@ -57,7 +97,7 @@
 
         for (key in occurrences) {
             if (Object.prototype.hasOwnProperty.call(occurrences, key)) {
-                token = self.makeToken(key, occurrences[key].sort(comparator));
+                token = HintUtils.makeToken(key, occurrences[key].sort(comparator));
                 results.push(token);
             }
         }
@@ -103,7 +143,7 @@
                                 if (index >= 0) {
                                     g = g.substring(0, index);
                                 }
-                                globals.push(self.makeToken(g.trim()));
+                                globals.push(HintUtils.makeToken(g.trim()));
                             });
                         } else if (c.value.indexOf("jslint") === 0) {
                             c.value.substring(7).split(",").forEach(function (e) {
@@ -111,8 +151,8 @@
                                     prop = (index >= 0) ? e.substring(0, index).trim() : "",
                                     val = (index >= 0) ? e.substring(index + 1, e.length).trim() : "";
 
-                                if (val === "true" && self.JSL_GLOBAL_DEFS.hasOwnProperty(prop)) {
-                                    globals = globals.concat(self.JSL_GLOBAL_DEFS[prop]);
+                                if (val === "true" && HintUtils.JSL_GLOBAL_DEFS.hasOwnProperty(prop)) {
+                                    globals = globals.concat(HintUtils.JSL_GLOBAL_DEFS[prop]);
                                 }
                             });
                         }
@@ -134,15 +174,15 @@
             literals        = parseObj ? siftPositions(scope, scope.walkDownLiterals, "value") : [],
             associations    = parseObj ? siftAssociations(scope, scope.walkDownAssociations) : [],
             response        = {
-                type            : self.SCOPE_MSG_TYPE,
+                type            : HintUtils.SCOPE_MSG_TYPE,
                 dir             : dir,
                 file            : file,
                 length          : length,
                 scope           : scope,
-                globals         : self.annotateGlobals(globals),
+                globals         : HintUtils.annotateGlobals(globals),
                 identifiers     : identifiers,
-                properties      : self.annotateWithPath(properties, dir, file),
-                literals        : self.annotateLiterals(literals, "string"),
+                properties      : HintUtils.annotateWithPath(properties, dir, file),
+                literals        : HintUtils.annotateLiterals(literals, "string"),
                 associations    : associations,
                 success         : !!parseObj
             };
@@ -166,11 +206,11 @@
             }
 
             respond(dir, file, text.length, {
-                scope : new self.Scope(ast),
+                scope : new Scope(ast),
                 globals : extractGlobals(ast.comments)
             });
         } catch (err) {
-            // _log("Parsing failed: " + err + " at " + err.index);
+            _log("Parsing failed: " + err + " at " + err.index);
             if (retries > 0) {
                 var lines = text.split("\n"),
                     lineno = Math.min(lines.length, err.lineNumber) - 1,
@@ -200,7 +240,7 @@
         var request = e.data,
             type = request.type;
 
-        if (type === self.SCOPE_MSG_TYPE) {
+        if (type === HintUtils.SCOPE_MSG_TYPE) {
             var dir     = request.dir,
                 file    = request.file,
                 text    = request.text,
@@ -211,11 +251,3 @@
         }
     });
 }());
-
-/*
- * Used by the Web Worker-specific importScripts operation
- */
-function define(f) {
-    'use strict';
-    f(null, self, null);
-}

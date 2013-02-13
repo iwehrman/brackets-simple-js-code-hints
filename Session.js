@@ -457,6 +457,5 @@ define(function (require, exports, module) {
         return hints;
     };
 
-    exports.Session = Session;
-    
+    module.exports = Session;
 });

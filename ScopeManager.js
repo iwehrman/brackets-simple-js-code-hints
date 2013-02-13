@@ -40,7 +40,7 @@ define(function (require, exports, module) {
         NativeFileSystem        = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
         ProjectManager          = brackets.getModule("project/ProjectManager"),
         HintUtils               = require("HintUtils"),
-        Scope                   = require("Scope").Scope;
+        Scope                   = require("Scope");
 
     var pendingRequest      = null,     // information about a deferred scope request
         fileState           = {},       // directory -> file -> state
@@ -198,7 +198,7 @@ define(function (require, exports, module) {
 
             return proplist;
         }
-        
+
         /* 
          * Combine association objects from multiple files
          */

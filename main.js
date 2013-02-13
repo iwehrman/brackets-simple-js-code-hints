@@ -33,7 +33,7 @@ define(function (require, exports, module) {
         StringUtils             = brackets.getModule("utils/StringUtils"),
         HintUtils               = require("HintUtils"),
         ScopeManager            = require("ScopeManager"),
-        Session                 = require("Session").Session;
+        Session                 = require("Session");
 
     var session             = null,  // object that encapsulates the current session state
         cachedHints         = null,  // sorted hints for the current hinting session
