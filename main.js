@@ -101,7 +101,7 @@ define(function (require, exports, module) {
                     }
                 }, limit);
             } else {
-                return tokens.splice(0, limit);
+                return tokens.slice(0, limit);
             }
         }
 
