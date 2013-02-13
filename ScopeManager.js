@@ -21,6 +21,13 @@
  * 
  */
 
+/*
+ * Throughout this file, the term "outer scope" is used to refer to the outer-
+ * most/global/root Scope objects for particular file. The term "inner scope"
+ * is used to refer to a Scope object that is reachable via the child relation
+ * from an outer scope.
+ */
+
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
 /*global define, brackets, $, Worker */
 
