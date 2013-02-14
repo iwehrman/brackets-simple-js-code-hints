@@ -22,7 +22,7 @@
  */
 
 /*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50, regexp: true */
-/*global self, importScripts, esprima, setTimeout */
+/*global self, importScripts, setTimeout */
 
 /**
  * Loads a file that contains an AMD module definition using the web worker
@@ -66,7 +66,7 @@ function require(url) {
 
     var Scope       = require("Scope.js"),
         HintUtils   = require('HintUtils.js'),
-        esprima     = require('esprima/esprima.js');
+        esprima     = require('thirdparty/esprima/esprima.js');
 
     var MAX_RETRIES = 100;
 
