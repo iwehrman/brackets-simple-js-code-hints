@@ -33,6 +33,8 @@
 function require(url) {
     "use strict";
 
+    var exports = {};
+
     /*
      * The following function is called by AMD modules when loaded with
      * importScripts. CommonJS-style modules will only pass a wrapper function
@@ -42,7 +44,7 @@ function require(url) {
      * case, the wrapper function expects only an exports arguments.
      */
     self.define = function (bindings, wrapper) {
-        var module = { exports: {} },
+        var module = { exports: exports },
             require = null;
 
         if (typeof bindings === "function") {
@@ -52,13 +54,10 @@ function require(url) {
         }
 
         wrapper(require, module.exports, module);
-        self.exports = module.exports;
+        exports = module.exports;
     };
     self.define.amd = true;
-
     importScripts(url);
-    var exports = self.exports;
-    delete self.exports;
     return exports;
 }
 
@@ -210,7 +209,7 @@ function require(url) {
                 globals : extractGlobals(ast.comments)
             });
         } catch (err) {
-            _log("Parsing failed: " + err + " at " + err.index);
+            // _log("Parsing failed: " + err + " at " + err.index);
             if (retries > 0) {
                 var lines = text.split("\n"),
                     lineno = Math.min(lines.length, err.lineNumber) - 1,
