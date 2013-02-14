@@ -21,7 +21,7 @@
  * 
  */
 
-/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50 */
+/*jslint vars: true, plusplus: true, devel: true, nomen: true, indent: 4, maxerr: 50, regexp: true */
 /*global define */
 
 define(function (require, exports, module) {
@@ -130,12 +130,8 @@ define(function (require, exports, module) {
         return literals.map(function (t) {
             t.literal = true;
             t.kind = kind;
-            if (t.value.indexOf(DOUBLE_QUOTE) > 0) {
-                if (t.value.indexOf(SINGLE_QUOTE) > 0) {
-                    t.delimeter = DOUBLE_QUOTE;
-                } else {
-                    t.delimeter = SINGLE_QUOTE;
-                }
+            if (/[\\\\]*[^\\]"/.test(t.value)) {
+                t.delimeter = SINGLE_QUOTE;
             } else {
                 t.delimeter = DOUBLE_QUOTE;
             }

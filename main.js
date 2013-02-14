@@ -299,7 +299,7 @@ define(function (require, exports, module) {
      * @param {string} hint - text to insert into current code editor
      */
     JSHints.prototype.insertHint = function ($hintObj) {
-        var hint        = $hintObj.data('token'),
+        var hint        = $hintObj.data("token"),
             completion  = hint.value,
             cursor      = session.getCursor(),
             token       = session.getToken(cursor),
@@ -330,9 +330,9 @@ define(function (require, exports, module) {
                 delimeter = hint.delimeter;
             }
 
-            completion = delimeter +
-                completion.replace(delimeter, "\\" + delimeter) +
-                delimeter;
+            completion = completion.replace("\\", "\\\\");
+            completion = completion.replace(delimeter, "\\" + delimeter);
+            completion = delimeter + completion + delimeter;
         }
 
         // Replace the current token with the completion
