@@ -209,6 +209,15 @@ function require(url) {
                 globals : extractGlobals(ast.comments)
             });
         } catch (err) {
+            // If parsing fails, we can try again after blanking out the line
+            // that caused the parse error. This is unreliable though, because
+            // the line number on which the parser fails is not necessarily the
+            // best line to remove. Some errors will cause the entire remainder
+            // of the file to be blanked out, never resulting in a parseable
+            // file. Consequently, this is attempted only when necessary; i.e.,
+            // when the request.force flag is set. 
+            // Inspired by fuckit.js: https://github.com/mattdiamond/fuckitjs
+
             // _log("Parsing failed: " + err + " at " + err.index);
             if (retries > 0) {
                 var lines = text.split("\n"),
@@ -216,13 +225,12 @@ function require(url) {
                     newline,
                     removed;
 
-                // Remove the offending line and start over
+                // Blank the offending line and start over
                 if (-1 < lineno < lines.length) {
                     newline = lines[lineno].replace(/./g, " ");
                     if (newline !== lines[lineno]) {
                         removed = lines.splice(lineno, 1, newline);
                         if (removed && removed.length > 0) {
-                            // _log("Removed: '" + removed[0] + "'");
                             setTimeout(function () {
                                 parse(dir, file, text.length, lines.join("\n"), --retries);
                             }, 0);
