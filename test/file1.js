@@ -14,10 +14,10 @@ function funB(paramB1, paramB2) {
     function funC(paramC1, paramC2) {
         var C1 = { propC : 1 },
             C2 = { propC : 2 };
-        
+
         B1.propB = 0;
         C1.propC = 0;
         B1.foo = 0;
-        console.log("hello world!");
+        console.log("hello\\\" world!");
     }
 }

@@ -331,6 +331,19 @@ define(function (require, exports, module) {
                 hintsPresentOrdered(hintObj, ["log", "propE"]);
             });
             
+            it("should choose the correct delimiter for string literal hints with no query", function () {
+                var start = { line: 18, ch: 0 },
+                    end   = { line: 18, ch: 18 };
+
+                testEditor.setCursorPos(start);
+                var hintObj = expectHints(JSCodeHints.jsHintProvider);
+                selectHint(JSCodeHints.jsHintProvider, hintObj, 13); // hint 13 is "hello\\\"world!"
+                runs(function () {
+                    expect(testEditor.getCursorPos()).toEqual(end);
+                    expect(testDoc.getRange(start, end)).toEqual('"hello\\\\\\" world!"');
+                });
+            });
+
             it("should insert value hints with no current query", function () {
                 var start = { line: 6, ch: 0 },
                     end   = { line: 6, ch: 4 };
@@ -343,7 +356,7 @@ define(function (require, exports, module) {
                     expect(testDoc.getRange(start, end)).toEqual("funB");
                 });
             });
-            
+
             it("should insert value hints replacing the current query", function () {
                 var start   = { line: 5, ch: 10 }, // A3 = A<here>2;
                     before  = { line: 5, ch: 9 },
