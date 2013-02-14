@@ -78,14 +78,14 @@ function require(url) {
      * Walk the scope to find all the objects of a given type, along with a
      * list of their positions in the file.
      */
-    function siftPositions(scope, walk, keyProp) {
+    function siftPositions(walk, keyProp) {
         var occurrences,
             results = [],
             key,
             token,
             comparator = function (a, b) { return a - b; };
 
-        occurrences = walk.call(scope, function (acc, token) {
+        occurrences = walk(function (acc, token) {
             if (Object.prototype.hasOwnProperty.call(acc, token[keyProp])) {
                 acc[token[keyProp]].push(token.range[0]);
             } else {
@@ -106,8 +106,8 @@ function require(url) {
     /**
      * Walk the scope to compute all available association objects
      */
-    function siftAssociations(scope) {
-        return scope.walkDownAssociations(function (acc, assoc) {
+    function siftAssociations(walk) {
+        return walk(function (acc, assoc) {
             var obj     = assoc.object,
                 prop    = assoc.property;
             
@@ -165,26 +165,34 @@ function require(url) {
         return globals;
     }
 
+    /**
+     * Send the scope and associated parse information back to the caller.
+     */
     function respond(dir, file, length, parseObj) {
-        var scope           = parseObj ? parseObj.scope : [],
-            globals         = parseObj ? parseObj.globals : [],
-            identifiers     = parseObj ? siftPositions(scope, scope.walkDownIdentifiers, "name") : [],
-            properties      = parseObj ? siftPositions(scope, scope.walkDownProperties, "name") : [],
-            literals        = parseObj ? siftPositions(scope, scope.walkDownLiterals, "value") : [],
-            associations    = parseObj ? siftAssociations(scope, scope.walkDownAssociations) : [],
-            response        = {
+        var success     = !!parseObj,
+            response    = {
                 type            : HintUtils.SCOPE_MSG_TYPE,
                 dir             : dir,
                 file            : file,
                 length          : length,
-                scope           : scope,
-                globals         : HintUtils.annotateGlobals(globals),
-                identifiers     : identifiers,
-                properties      : HintUtils.annotateWithPath(properties, dir, file),
-                literals        : HintUtils.annotateLiterals(literals, "string"),
-                associations    : associations,
-                success         : !!parseObj
+                success         : success
             };
+
+        if (success) {
+            var scope           = parseObj.scope,
+                globals         = parseObj.globals,
+                identifiers     = siftPositions(scope.walkDownIdentifiers.bind(scope), "name"),
+                properties      = siftPositions(scope.walkDownProperties.bind(scope), "name"),
+                literals        = siftPositions(scope.walkDownLiterals.bind(scope), "value"),
+                associations    = siftAssociations(scope.walkDownAssociations.bind(scope));
+
+            response.scope = scope;
+            response.globals = HintUtils.annotateGlobals(globals);
+            response.identifiers = identifiers;
+            response.properties = HintUtils.annotateWithPath(properties, dir, file);
+            response.literals = HintUtils.annotateLiterals(literals, "string");
+            response.associations = associations;
+        }
 
         self.postMessage(response);
     }
@@ -199,10 +207,6 @@ function require(url) {
                 tolerant    : true,
                 comment     : true
             });
-
-            if (ast.errors.length > 0) {
-                _log("Parse errors: " + JSON.stringify(ast.errors));
-            }
 
             respond(dir, file, text.length, {
                 scope : new Scope(ast),
