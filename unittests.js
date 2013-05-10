@@ -1,3 +1,26 @@
+/*
+ * Copyright (c) 2013 Adobe Systems Incorporated. All rights reserved.
+ *  
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"), 
+ * to deal in the Software without restriction, including without limitation 
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+ * and/or sell copies of the Software, and to permit persons to whom the 
+ * Software is furnished to do so, subject to the following conditions:
+ *  
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *  
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+ * DEALINGS IN THE SOFTWARE.
+ * 
+ */
+
 /*jslint vars: true, plusplus: true, devel: true, browser: true, nomen: true, indent: 4, maxerr: 50 */
 /*global define, describe, it, xit, expect, beforeEach, afterEach, waitsFor, runs, $, brackets, waitsForDone */
 
@@ -18,28 +41,37 @@ define(function (require, exports, module) {
         testEditor;
 
     /**
-     * Returns an Editor suitable for use in isolation: i.e., a Document that
-     * will never be set as the currentDocument or added to the working set.
-     * @return {!Editor}
+     * Returns an Editor suitable for use in isolation, given a Document. (Unlike
+     * SpecRunnerUtils.createMockEditor(), which is given text and creates the Document
+     * for you).
+     *
+     * @param {Document} doc - the document to be contained by the new Editor
+     * @return {Editor} - the mock editor object
      */
-    function createMockEditor(doc, mode, visibleRange) {
-        mode = mode || "";
-        
+    function createMockEditor(doc) {
         // Initialize EditorManager
         var $editorHolder = $("<div id='mock-editor-holder'/>");
         EditorManager.setEditorHolder($editorHolder);
-        EditorManager._init();
         $("body").append($editorHolder);
         
         // create Editor instance
-        var editor = new Editor(doc, true, mode, $editorHolder.get(0), visibleRange);
+        var editor = new Editor(doc, true, $editorHolder.get(0));
         
         return editor;
     }
 
     describe("JavaScript Code Hinting", function () {
 
-        // Ask provider for hints at current cursor position; expect it to return some
+        /*
+         * Ask provider for hints at current cursor position; expect it to
+         * return some
+         * 
+         * @param {Object} provider - a CodeHintProvider object
+         * @param {string} key - the charCode of a key press that triggers the
+         *      CodeHint provider
+         * @return {boolean} - whether the provider has hints in the context of
+         *      the test editor
+         */
         function expectHints(provider, key) {
             if (key === undefined) {
                 key = null;
@@ -49,7 +81,14 @@ define(function (require, exports, module) {
             return provider.getHints(null);
         }
         
-        // Ask provider for hints at current cursor position; expect it NOT to return any
+        /*
+         * Ask provider for hints at current cursor position; expect it NOT to
+         * return any
+         * 
+         * @param {Object} provider - a CodeHintProvider object
+         * @param {string} key - the charCode of a key press that triggers the
+         *      CodeHint provider
+         */
         function expectNoHints(provider, key) {
             
             if (key === undefined) {
@@ -59,6 +98,14 @@ define(function (require, exports, module) {
             expect(provider.hasHints(testEditor, key)).toBe(false);
         }
 
+        /*
+         * Return the index at which hint occurs in hintList
+         * 
+         * @param {Array.<Object>} hintList - the list of hints
+         * @param {string} hint - the hint to search for
+         * @return {number} - the index into hintList at which the hint occurs,
+         * or -1 if it does not
+         */
         function _indexOf(hintList, hint) {
             var index = -1,
                 counter = 0;
@@ -72,6 +119,15 @@ define(function (require, exports, module) {
             return index;
         }
         
+        /*
+         * Wait for a hint response object to resolve, then apply a callback
+         * to the result
+         * 
+         * @param {Object + jQuery.Deferred} hintObj - a hint response object,
+         *      possibly deferred
+         * @param {Function} callback - the callback to apply to the resolved
+         *      hint response object
+         */
         function _waitForHints(hintObj, callback) {
             var complete = false,
                 hintList = null;
@@ -92,17 +148,34 @@ define(function (require, exports, module) {
 
             runs(function () { callback(hintList); });
         }
-        
-        
-        function hintsAbsent(hintObj, expectedHints) {
+
+        /*
+         * Expect a given list of hints to be absent from a given hint
+         * response object
+         * 
+         * @param {Object + jQuery.Deferred} hintObj - a hint response object,
+         *      possibly deferred
+         * @param {Array.<string>} absentHints - a list of hints that should not
+         *      be present in the hint response
+         */
+        function hintsAbsent(hintObj, absentHints) {
             _waitForHints(hintObj, function (hintList) {
                 expect(hintList).not.toBeNull();
-                expectedHints.forEach(function (expectedHint) {
-                    expect(_indexOf(hintList, expectedHint)).toBe(-1);
+                absentHints.forEach(function (absentHint) {
+                    expect(_indexOf(hintList, absentHint)).toBe(-1);
                 });
             });
         }
 
+        /*
+         * Expect a given list of hints to be present in a given hint
+         * response object
+         * 
+         * @param {Object + jQuery.Deferred} hintObj - a hint response object,
+         *      possibly deferred
+         * @param {Array.<string>} expectedHints - a list of hints that should be
+         *      present in the hint response
+         */
         function hintsPresent(hintObj, expectedHints) {
             _waitForHints(hintObj, function (hintList) {
                 expect(hintList).not.toBeNull();
@@ -112,6 +185,15 @@ define(function (require, exports, module) {
             });
         }
 
+        /*
+         * Expect a given list of hints to be present in the given order in a
+         * given hint response object
+         * 
+         * @param {Object + jQuery.Deferred} hintObj - a hint response object,
+         *      possibly deferred
+         * @param {Array.<string>} expectedHints - a list of hints that should be
+         *      present in the given order in the hint response
+         */
         function hintsPresentOrdered(hintObj, expectedHints) {
             var prevIndex = -1,
                 currIndex;
@@ -125,7 +207,16 @@ define(function (require, exports, module) {
                 });
             });
         }
-        
+
+        /*
+         * Expect a given list of hints to be present in a given hint
+         * response object, and no more.
+         * 
+         * @param {Object + jQuery.Deferred} hintObj - a hint response object,
+         *      possibly deferred
+         * @param {Array.<string>} expectedHints - a list of hints that should be
+         *      present in the hint response, and no more.
+         */
         function hintsPresentExact(hintObj, expectedHints) {
             _waitForHints(hintObj, function (hintList) {
                 expect(hintList).not.toBeNull();
@@ -134,7 +225,18 @@ define(function (require, exports, module) {
                 });
             });
         }
-        
+
+        /*
+         * Simulation of selection of a particular hint in a hint list.
+         * Presumably results in side effects in the hint provider's 
+         * current editor context.
+         * 
+         * @param {Object} provider - a CodeHint provider object
+         * @param {Object} hintObj - a hint response object from that provider,
+         *      possibly deferred
+         * @param {number} index - the index into the hint list at which a hint
+         *      is to be selected
+         */
         function selectHint(provider, hintObj, index) {
             var hintList = expectHints(provider);
             _waitForHints(hintObj, function (hintList) {
@@ -143,7 +245,7 @@ define(function (require, exports, module) {
                 expect(provider.insertHint(hintList[index])).toBe(false);
             });
         }
-        
+
         describe("JavaScript Code Hinting", function () {
    
             beforeEach(function () {
@@ -158,7 +260,7 @@ define(function (require, exports, module) {
                 
                 // create Editor instance (containing a CodeMirror instance)
                 runs(function () {
-                    testEditor = createMockEditor(testDoc, "javascript");
+                    testEditor = createMockEditor(testDoc);
                     JSCodeHints.initializeSession(testEditor);
                 });
             });
@@ -185,11 +287,11 @@ define(function (require, exports, module) {
                 hintsPresentExact(hintObj, ["A2", "A3", "A1"]);
                 hintsAbsent(hintObj, ["funB"]);
             });
-            
+
             it("should list keywords", function () {
                 testEditor.setCursorPos({ line: 6, ch: 0 });
                 var hintObj = expectHints(JSCodeHints.jsHintProvider);
-                hintsPresent(hintObj, ["function", "var", "switch"]);
+                hintsPresent(hintObj, ["break", "case", "catch"]);
             });
             
             it("should list explicitly defined globals from JSLint annotations", function () {
@@ -240,7 +342,7 @@ define(function (require, exports, module) {
                 hintsAbsent(hintObj, ["D1", "D2", "funE", "E1", "E2"]);
             });
             
-            it("should NOT property names on value lookups", function () {
+            it("should NOT list property names on value lookups", function () {
                 testEditor.setCursorPos({ line: 6, ch: 0 });
                 var hintObj = expectHints(JSCodeHints.jsHintProvider);
                 hintsAbsent(hintObj, ["propA", "propB", "propC"]);
@@ -258,7 +360,7 @@ define(function (require, exports, module) {
                 hintsPresent(hintObj, ["use strict"]);
             });
             
-            it("should NOT list string literals that other files", function () {
+            it("should NOT list string literals from other files", function () {
                 testEditor.setCursorPos({ line: 6, ch: 0 });
                 var hintObj = expectHints(JSCodeHints.jsHintProvider);
                 hintsAbsent(hintObj, ["a very nice string"]);
@@ -293,9 +395,9 @@ define(function (require, exports, module) {
                 expectNoHints(JSCodeHints.jsHintProvider, "{");
             });
             
-            it("should list implicit hints when typing variable names", function () {
+            it("should list explicit hints for variable and function names", function () {
                 testEditor.setCursorPos({ line: 6, ch: 0 });
-                var hintObj = expectHints(JSCodeHints.jsHintProvider);
+                var hintObj = expectHints(JSCodeHints.jsHintProvider, null);
                 hintsPresentExact(hintObj, ["A2", "A3", "funB", "A1"]);
             });
             
@@ -314,14 +416,14 @@ define(function (require, exports, module) {
                 expectHints(JSCodeHints.jsHintProvider, "\"");
             });
             
-            it("should give priority to property names with associated with the current context", function () {
+            it("should give priority to property names associated with the current context", function () {
                 testEditor.setCursorPos({ line: 19, ch: 11 });
                 var hintObj = expectHints(JSCodeHints.jsHintProvider);
                 hintsPresentOrdered(hintObj, ["propB", "propA"]);
                 hintsPresentOrdered(hintObj, ["propB", "propC"]);
             });
             
-            it("should give priority to property names with associated with the current context from other files", function () {
+            it("should give priority to property names associated with the current context from other files", function () {
                 testEditor.setCursorPos({ line: 20, ch: 16 });
                 var hintObj = expectHints(JSCodeHints.jsHintProvider);
                 hintsPresentOrdered(hintObj, ["log", "propA"]);

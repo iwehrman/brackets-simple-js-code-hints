@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Adobe Systems Incorporated. All rights reserved.
+ * Copyright (c) 2013 Adobe Systems Incorporated. All rights reserved.
  *  
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"), 
@@ -33,6 +33,9 @@ define(function (require, exports, module) {
     /**
      * Session objects encapsulate state associated with a hinting session
      * and provide methods for updating and querying the session.
+     *
+     * @constructor
+     * @param {Editor} editor - the editor context for the session
      */
     function Session(editor) {
         this.editor = editor;
@@ -41,6 +44,10 @@ define(function (require, exports, module) {
 
     /**
      * Update the scope information assocated with the current session
+     * 
+     * @param {Object} scopeInfo - scope information, including the scope and
+     *      lists of identifiers, globals, literals and properties, and a set
+     *      of associations
      */
     Session.prototype.setScopeInfo = function (scopeInfo) {
         this.scope = scopeInfo.scope;
@@ -53,6 +60,9 @@ define(function (require, exports, module) {
 
     /**
      * Get the name of the file associated with the current session
+     * 
+     * @return {string} - the full pathname of the file associated with the
+     *      current session
      */
     Session.prototype.getPath = function () {
         return this.path;
@@ -61,7 +71,7 @@ define(function (require, exports, module) {
     /**
      * Get the current cursor position.
      *
-     * @return Object<line: number, ch, number>
+     * @return {{line: number, ch: number}} - the current cursor position
      */
     Session.prototype.getCursor = function () {
         return this.editor.getCursorPos();
@@ -69,6 +79,9 @@ define(function (require, exports, module) {
     
     /**
      * Get the offset of the current cursor position
+     *
+     * @return {number} - the offset into the current document of the current
+     *      cursor
      */
     Session.prototype.getOffset = function () {
         var cursor = this.getCursor();
@@ -79,6 +92,10 @@ define(function (require, exports, module) {
     /**
      * Get the token at the given cursor position, or at the current cursor
      * if none is given.
+     * 
+     * @param {?{line: number, ch: number}} cursor - the cursor position
+     *      at which to retrieve a token
+     * @return {Object} - the CodeMirror token at the given cursor position
      */
     Session.prototype.getToken = function (cursor) {
         var cm = this.editor._codeMirror;
@@ -92,6 +109,10 @@ define(function (require, exports, module) {
     
     /**
      * Get the next cursor position on the line, or null if there isn't one.
+     * 
+     * @return {?{line: number, ch: number}} - the cursor position
+     *      immediately following the current cursor position, or null if
+     *      none exists.
      */
     Session.prototype.getNextCursorOnLine = function () {
         var cursor  = this.getCursor(),
@@ -109,12 +130,17 @@ define(function (require, exports, module) {
     };
     
     /**
-     * Get the token before the one at the given cursor
+     * Get the token before the one at the given cursor position
+     * 
+     * @param {{line: number, ch: number}} cursor - cursor position after
+     *      which a token should be retrieved
+     * @return {Object} - the CodeMirror token before the one at the given
+     *      cursor position
      */
     Session.prototype._getPreviousToken = function (cursor) {
         var token   = this.getToken(cursor),
             prev    = token,
-            doc;
+            doc     = this.editor.document;
 
         do {
             if (prev.start < cursor.ch) {
@@ -122,7 +148,6 @@ define(function (require, exports, module) {
             } else if (prev.start > 0) {
                 cursor.ch = prev.start - 1;
             } else if (cursor.line > 0) {
-                doc = this.editor.document;
                 cursor.ch = doc.getLine(cursor.line - 1).length;
                 cursor.line--;
             } else {
@@ -136,7 +161,10 @@ define(function (require, exports, module) {
     
     /**
      * Calculate a query string relative to the current cursor position
-     * and token.
+     * and token. E.g., from a state "identi<cursor>er", the query string is
+     * "identi".
+     * 
+     * @return {string} - the query string for the current cursor position
      */
     Session.prototype.getQuery = function () {
         var cursor  = this.getCursor(),
@@ -155,6 +183,12 @@ define(function (require, exports, module) {
     /**
      * Find the context of a property lookup. For example, for a lookup 
      * foo(bar, baz(quux)).prop, foo is the context.
+     * 
+     * @param {{line: number, ch: number}} cursor - the cursor position
+     *      at which context information is to be retrieved
+     * @param {number} depth - the current depth of the parenthesis stack, or
+     *      undefined if the depth is 0.
+     * @return {string} - the context for the property that was looked up
      */
     Session.prototype.getContext = function (cursor, depth) {
         var token = this.getToken(cursor);
@@ -180,8 +214,15 @@ define(function (require, exports, module) {
     };
 
     /**
-     * Get the type of the type of the current session, i.e., whether it is a
-     * property lookup and, if so, what the context of the lookup is. 
+     * Get the type of the current session, i.e., whether it is a property
+     * lookup and, if so, what the context of the lookup is.
+     * 
+     * @return {{property: boolean, context: string}} - a pair consisting
+     *      of a {boolean} "property" that indicates whether or not the type of
+     *      the session is a property lookup, and a {string} "context" that
+     *      indicates the object context (as described in getContext above) of
+     *      the property lookup, or null if there is none. The context is
+     *      always null for non-property lookups.
      */
     Session.prototype.getType = function () {
         var propertyLookup  = false,
@@ -213,21 +254,36 @@ define(function (require, exports, module) {
     };
 
     /**
-     * Get a list of hints for the current session using the current scope information. 
+     * Get a list of hints for the current session using the current scope
+     * information. 
+     * 
+     * @return {Array.<Object>} - the sorted list of hints for the current 
+     *      session.
      */
     Session.prototype.getHints = function () {
         
         /*
          * Comparator for sorting tokens according to minimum distance from
          * a given position
+         * 
+         * @param {number} pos - the position to which a token's occurrences
+         *      are compared
+         * @param {Function} - the comparator function
          */
         function compareByPosition(pos) {
             
             /*
              * Compute the minimum distance between a token, with which is 
              * associated a sorted list of positions, and a given offset.
+             *
+             * @param {number} pos - the position to which a token's occurrences
+             *      are compared.
+             * @param {Object} token - a hint token, annotated with a list of
+             *      occurrence positions
+             * @return number - the least distance of an occurrence of token to
+             *      pos, or Infinity if there are no occurrences
              */
-            function mindist(pos, token) {
+            function minDistToPos(pos, token) {
                 var arr     = token.positions,
                     low     = 0,
                     high    = arr.length,
@@ -265,9 +321,14 @@ define(function (require, exports, module) {
             return function (a, b) {
                 
                 /*
-                 * Lookup the cached minimum distance from an occurrence of the
-                 * token to the given position, calculating and storing it if
-                 * needed.
+                 * Look up the cached minimum distance from an occurrence of
+                 * the token to the given position, calculating and storing it
+                 * if needed.
+                 * 
+                 * @param {Object} token - the token from which the minimum
+                 *      distance to position pos is required
+                 * @return {number} - the least distance of an occurrence of
+                 *      token to position pos
                  */
                 function getDistToPos(token) {
                     var dist;
@@ -275,26 +336,26 @@ define(function (require, exports, module) {
                     if (token.distToPos >= 0) {
                         dist = token.distToPos;
                     } else {
-                        dist = mindist(pos, token);
+                        dist = minDistToPos(pos, token);
                         token.distToPos = dist;
                     }
                     return dist;
                 }
 
-                var adist = getDistToPos(a),
-                    bdist = getDistToPos(b);
+                var aDist = getDistToPos(a),
+                    bDist = getDistToPos(b);
 
-                if (adist === Infinity) {
-                    if (bdist === Infinity) {
+                if (aDist === Infinity) {
+                    if (bDist === Infinity) {
                         return 0;
                     } else {
                         return 1;
                     }
                 } else {
-                    if (bdist === Infinity) {
+                    if (bDist === Infinity) {
                         return -1;
                     } else {
-                        return adist - bdist;
+                        return aDist - bDist;
                     }
                 }
             };
@@ -303,6 +364,11 @@ define(function (require, exports, module) {
         /*
          * Comparator for sorting tokens lexicographically according to scope,
          * assuming the scope level has already been annotated.
+         * 
+         * @param {Object} a - a token
+         * @param {Object} b - another token
+         * @param {number} - comparator value that indicates whether a is more
+         *      tightly scoped than b
          */
         function compareByScope(a, b) {
             var adepth = a.level;
@@ -325,6 +391,11 @@ define(function (require, exports, module) {
         
         /*
          * Comparator for sorting tokens by name
+         * 
+         * @param {Object} a - a token
+         * @param {Object} b - another token
+         * @return {number} - comparator value that indicates whether the name
+         *      of token a is lexicographically lower than the name of token b
          */
         function compareByName(a, b) {
             if (a.value === b.value) {
@@ -337,8 +408,11 @@ define(function (require, exports, module) {
         }
         
         /*
-         * Comparator for sorting tokens by path, such that
-         * a <= b if a.path === path
+         * Comparator for sorting tokens by path, such that a <= b if
+         * a.path === path
+         *
+         * @param {string} path - the target path name
+         * @return {Function} - the comparator function
          */
         function compareByPath(path) {
             return function (a, b) {
@@ -360,6 +434,9 @@ define(function (require, exports, module) {
         
         /*
          * Comparator for sorting properties w.r.t. an association object.
+         * 
+         * @param {Object} assoc - an association object
+         * @return {Function} - the comparator function
          */
         function compareByAssociation(assoc) {
             return function (a, b) {
@@ -380,7 +457,13 @@ define(function (require, exports, module) {
         }
 
         /*
-         * Forms the lexicographical composition of comparators
+         * Forms the lexicographical composition of comparators, i.e., 
+         * "a lex(c1,c2) b" iff "a c1 b or (a = b and a c2 b)"
+         * 
+         * @param {Function} compare1 - a comparator
+         * @param {Function} compare2 - another comparator
+         * @return {Function} - the lexicographic composition of comparator1
+         *      and comparator2
          */
         function lexicographic(compare1, compare2) {
             return function (a, b) {
@@ -394,7 +477,12 @@ define(function (require, exports, module) {
         }
 
         /*
-         * A comparator for identifiers
+         * A comparator for identifiers: the lexicographic combination of
+         * scope, position and name.
+         * 
+         * @param {number} pos - the target position by which identifiers are
+         *      compared
+         * @return {Function} - the comparator function
          */
         function compareIdentifiers(pos) {
             return lexicographic(compareByScope,
@@ -403,7 +491,16 @@ define(function (require, exports, module) {
         }
         
         /*
-         * A comparator for properties
+         * A comparator for properties: the lexicographic combination of
+         * association, path name, position, and name.
+         * 
+         * @param {Object} assoc - the association by which properties are
+         *      compared
+         * @param {string} path - the path name by which properties are
+         *      compared
+         * @param {number} pos - the target position by which properties are
+         *      compared
+         * @return {Function} - the comparator function
          */
         function compareProperties(assoc, path, pos) {
             return lexicographic(compareByAssociation(assoc),
@@ -415,6 +512,10 @@ define(function (require, exports, module) {
         /*
          * Clone a list of hints. (Used so that later annotations are not 
          * preserved when scope information changes.)
+         * 
+         * @param {Array.<Object>} hints - an array of hint tokens
+         * @return {Array.<Object>} - a new array of objects that are clones of
+         *      the objects in the input array
          */
         function copyHints(hints) {
             function cloneToken(token) {

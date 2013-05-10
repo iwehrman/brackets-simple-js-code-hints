@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Adobe Systems Incorporated. All rights reserved.
+ * Copyright (c) 2013 Adobe Systems Incorporated. All rights reserved.
  *  
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"), 
@@ -27,11 +27,54 @@
 define(function (require, exports, module) {
     "use strict";
 
+    /*
+     * Performs a binary search among an array of scope objects for one with a
+     * range that contains pos. The array must be non-empty and sorted
+     * ascending according to the objects' (disjoint) ranges.
+     *
+     * @param {Array.<Object>} arr - the sorted array of scope objects to
+     *      search
+     * @param {number} pos - the position to search for in arr
+     * @return {Object} - the scope object containing pos
+     */
+    function binaryRangeSearch(arr, pos) {
+        var low     = 0,
+            high    = arr.length,
+            middle  = Math.floor(high / 2);
+
+        // binary search for the position among the sorted ranges
+        while (low < middle && middle < high) {
+            if (arr[middle].range.end < pos) {
+                low = middle;
+                middle += Math.floor((high - middle) / 2);
+            } else if (arr[middle].range.start > pos) {
+                high = middle;
+                middle = low + Math.floor((middle - low) / 2);
+            } else {
+                break;
+            }
+        }
+        return arr[middle];
+    }
+
+    /**
+     * Build a scope object from AST tree as a child of the given parent.
+     * 
+     * @constructor
+     * @param {AST} tree - an AST as described at 
+            https://developer.mozilla.org/en-US/docs/SpiderMonkey/Parser_API
+     * @param {?Scope=} parent - the (optional) parent of the new Scope
+     */
     function Scope(tree, parent) {
 
         /*
          * Given a member expression, try to add a target-property association
          * to the given scope.
+         * 
+         * @param {AST} object - the lookup object
+         * @param {AST} property - the property being looked up
+         * @param {Scope} parent - the Scope object in which the association
+         *      occurs.
          */
         function _buildAssociations(object, property, parent) {
             if (property.type === "Identifier") {
@@ -47,7 +90,7 @@ define(function (require, exports, module) {
                     object.name = "this";
                     parent.addAssociation(object, property);
                 } else {
-                    // most likely a call expression or a literal
+                    // most likely a literal
                     return;
                 }
             } else {
@@ -58,7 +101,11 @@ define(function (require, exports, module) {
         }
 
         /*
-         * Build scope information for an AST as a child scope of parent.
+         * Walk a given AST and add scope information to a given parent scope, 
+         * including new child Scope objects. 
+         * 
+         * @param {AST} tree - the AST from which the Scope is constructed
+         * @param {Scope} parent - the parent of the Scope to be constructed
          */
         function _buildScope(tree, parent) {
             var child;
@@ -230,8 +277,8 @@ define(function (require, exports, module) {
                 break;
 
             case "NewExpression":
-                if (tree['arguments']) { // pacifies JSLint
-                    tree['arguments'].forEach(function (t) {
+                if (tree["arguments"]) { // pacifies JSLint
+                    tree["arguments"].forEach(function (t) {
                         _buildScope(t, parent);
                     });
                 }
@@ -257,7 +304,7 @@ define(function (require, exports, module) {
                 break;
 
             case "CallExpression":
-                tree['arguments'].forEach(function (t) {
+                tree["arguments"].forEach(function (t) {
                     _buildScope(t, parent);
                 });
                 _buildScope(tree.callee, parent);
@@ -309,7 +356,7 @@ define(function (require, exports, module) {
             this.parent = parent;
         }
 
-        this.idDeclarations = [];
+        this.idDeclarations = {};
         this.idOccurrences = [];
         this.propOccurrences = [];
         this.associations = [];
@@ -331,6 +378,10 @@ define(function (require, exports, module) {
      * Rebuild a Scope object from an object that has all the necessary data
      * but the wrong prototype. Such objects may be created as a result of
      * e.g., JSON-marshalling and unmarshalling a scope.
+     * 
+     * @param {Object} data - an object that contains all data of a Scope object
+     *      but none of the methods
+     * @return {Scope} - the same object with Scope methods added
      */
     Scope.rebuild = function (data) {
         var memberName,
@@ -354,6 +405,8 @@ define(function (require, exports, module) {
 
     /* 
      * Add an identifier occurrence.
+     * 
+     * @param {AST} id - an identifier AST node
      */
     Scope.prototype.addIdOccurrence = function (id) {
         this.idOccurrences.push(id);
@@ -361,24 +414,30 @@ define(function (require, exports, module) {
     
     /*
      * Add an identifier declaration
+     * 
+     * @param {AST} id - an identifier AST node
      */
     Scope.prototype.addDeclaration = function (id) {
-        this.idDeclarations.push(id);
+        this.idDeclarations[id.name] = id;
         this.addIdOccurrence(id);
     };
     
     /*
      * Add a list of identifier declarations
+     * 
+     * @param {Array.<AST>} ids - a list of identifier AST nodes
      */
     Scope.prototype.addAllDeclarations = function (ids) {
         var that = this;
         ids.forEach(function (i) {
-            that.idDeclarations.push(i);
+            that.addDeclaration(i);
         });
     };
     
     /* 
      * Add a property occurrence
+     * 
+     * @param {AST} prop - a property AST node
      */
     Scope.prototype.addProperty = function (prop) {
         this.propOccurrences.push(prop);
@@ -386,6 +445,9 @@ define(function (require, exports, module) {
 
     /* 
      * Add an association object
+     * 
+     * @param {AST} obj - an identifier AST node 
+     * @param {AST} prop - a property AST node
      */
     Scope.prototype.addAssociation = function (obj, prop) {
         this.associations.push({object: obj, property: prop});
@@ -393,13 +455,18 @@ define(function (require, exports, module) {
     
     /*
      * Add a literal occurrence
+     * 
+     * @param {AST} lit - a literal AST node
      */
     Scope.prototype.addLiteralOccurrence = function (lit) {
         this.literals.push(lit);
     };
 
     /*
-     * Attach a new child scope to the current scope
+     * Attach a new child scope to the current scope. Inserts the child scope
+     * in range-sorted order w.r.t. the other children of the current scope.
+     * 
+     * @param {Scope} child - the child to be added
      */
     Scope.prototype.addChildScope = function (child) {
         var i = 0;
@@ -410,43 +477,24 @@ define(function (require, exports, module) {
         }
         this.children.splice(i, 0, child);
     };
-    
-    /*
-     * Find the child scope of the current scope for a given position
-     */
-    Scope.prototype.findChild = function (pos) {
-        var i;
-        
-        if (this.range.start <= pos && pos <= this.range.end) {
-            for (i = 0; i < this.children.length; i++) {
-                if (this.children[i].range.start <= pos &&
-                        pos <= this.children[i].range.end) {
-                    return this.children[i].findChild(pos);
-                }
-            }
-            // if no child has a matching range, this is the most precise scope
-            return this;
-        } else {
-            return null;
-        }
-    };
-    
+
     /* 
      * Is the symbol declared in this scope?
+     * 
+     * @param {string} sym - a symbol name
+     * @return {boolean} - whether a symbol with that name is declared in this
+     *      immediate scope
      */
     Scope.prototype.member = function (sym) {
-        var i;
-        
-        for (i = 0; i < this.idDeclarations.length; i++) {
-            if (this.idDeclarations[i].name === sym) {
-                return true;
-            }
-        }
-        return false;
+        return Object.prototype.hasOwnProperty.call(this.idDeclarations, sym);
     };
     
     /*
      * Is the symbol declared in this scope or a parent scope?
+     *
+     * @param {string} sym - a symbol name
+     * @return {boolean} - whether a symbol with that name is declared in this
+     *      immediate scope or a parent scope
      */
     Scope.prototype.contains = function (sym) {
         var depth = 0,
@@ -466,6 +514,9 @@ define(function (require, exports, module) {
     
     /*
      * Does this scope, or its children, contain the given position?
+     * 
+     * @param {number} pos - the position to test for inclusion in the scope
+     * @return {boolean} - is the position included in the scope?
      */
     Scope.prototype.containsPosition = function (pos) {
         return this.range.start <= pos && pos <= this.range.end;
@@ -473,27 +524,57 @@ define(function (require, exports, module) {
     
     /*
      * Does this scope, but not its children, contain the given position? 
+     * 
+     * @param {number} pos - the position to test for inclusion in the scope
+     * @return {boolean} - is the position directly included in the scope?
      */
     Scope.prototype.containsPositionImmediate = function (pos) {
-        var children = this.children,
-            i;
-        
-        // is in the scope's range...
         if (this.containsPosition(pos)) {
-            for (i = 0; i < children.length; i++) {
-                // but not in a child's scope
-                if (children[i].containsPosition(pos)) {
-                    return false;
-                }
+            if (this.children.length === 0) {
+                // contains the position and there are no children
+                return true;
+            } else {
+                var child = binaryRangeSearch(this.children, pos);
+                // contains the position if the nearest child does not
+                return !child.containsPosition(pos);
             }
-            return true;
         } else {
+            // does not contain the position
             return false;
         }
     };
     
+    /*
+     * Find the child scope of the current scope for a given position
+     *
+     * @param {number} pos - the position at which to find a child scope
+     * @return {?Scope} - the child scope for the given position, or null
+     *      if none exists
+     */
+    Scope.prototype.findChild = function (pos) {
+        if (this.containsPosition(pos)) {
+            if (this.children.length === 0) {
+                // there are no children, so this is the most precise scope
+                return this;
+            } else {
+                var child = binaryRangeSearch(this.children, pos);
+                // the most precise scope is the most precise scope of the child,
+                // unless no child contains the position, in which case this is
+                // the most precise scope
+                return child.findChild(pos) || this;
+            }
+        } else {
+            return null;
+        }
+    };
+
     /**
-     * Traverse the scope down via children
+     * Traverse the scope down via children in pre-order.
+     * 
+     * @param {Function} add - the Scope accumulation function
+     * @param {Object} init - an initial value for the accumulation function
+     * @return {Object} - the result of accumulating the current scope along
+     *      with all of its children
      */
     Scope.prototype.walkDown = function (add, init) {
         var result = add(this, init);
@@ -507,6 +588,12 @@ define(function (require, exports, module) {
 
     /* 
      * Traverse a particular list in the scope down via children
+     *
+     * @param {Function} addItem - the item accumulation function
+     * @param {Object} init - an initial value for the accumulation function
+     * @param {string} listName - the name of a Scope property
+     * @return {Object} - the result of accumulating the given property for
+     *      the current scope along with all of its children
      */
     Scope.prototype.walkDownList = function (addItem, init, listName) {
         function addList(scope, init) {
@@ -518,114 +605,77 @@ define(function (require, exports, module) {
         
         return this.walkDown(addList, init);
     };
-       
-    /*
-     * Traverse identifier declarations in the scope down via children
-     */
-    Scope.prototype.walkDownDeclarations = function (add, init) {
-        return this.walkDownList(add, init, 'idDeclarations');
-    };
 
     /*
      * Traverse identifier occurrences in the scope down via children
+     *
+     * @param {Function} add - the identifier accumulation function
+     * @param {Object} init - an initial value for the accumulation function
+     * @return {Object} - the result of accumulating identifier occurrences
+     *      for the current scope along with all of its children
      */
     Scope.prototype.walkDownIdentifiers = function (add, init) {
-        return this.walkDownList(add, init, 'idOccurrences');
+        return this.walkDownList(add, init, "idOccurrences");
     };
 
     /*
      * Traverse property occurrences in the scope down via children
+     *
+     * @param {Function} add - the property accumulation function
+     * @param {Object} init - an initial value for the accumulation function
+     * @return {Object} - the result of of accumulating property occurrences
+     *      for the current scope along with all of its children
      */
     Scope.prototype.walkDownProperties = function (add, init) {
-        return this.walkDownList(add, init, 'propOccurrences');
+        return this.walkDownList(add, init, "propOccurrences");
     };
 
     /*
      * Traverse associations in the scope down via children
+     *
+     * @param {Function} add - the association accumulation function
+     * @param {Object} init - an initial value for the accumulation function
+     * @return {Object} - the result of of accumulating association occurrences
+     *      for the current scope along with all of its children
      */
     Scope.prototype.walkDownAssociations = function (add, init) {
-        return this.walkDownList(add, init, 'associations');
+        return this.walkDownList(add, init, "associations");
     };
 
     /*
      * Traverse literals in the scope down via children
+     *
+     * @param {Function} add - the literal accumulation function
+     * @param {Object} init - an initial value for the accumulation function
+     * @return {Object} - the result of of accumulating literal occurrences
+     *      for the current scope along with all of its children
      */
     Scope.prototype.walkDownLiterals = function (add, init) {
-        return this.walkDownList(add, init, 'literals');
+        return this.walkDownList(add, init, "literals");
     };
     
     /**
      * Traverse the scope up via the parent
+     *
+     * @param {Function} add - the Scope accumulation function
+     * @param {Object} init - an initial value for the accumulation function
+     * @param {string} prop - the property name to combine scope information for
+     * @return {Object} - the result of of accumulating the current scope along
+     *      with its parents
      */
     Scope.prototype.walkUp = function (add, init, prop) {
-        var scope = this,
-            result = init,
-            i;
+        var scope   = this,
+            result  = init,
+            combine = function (elem) {
+                result = add(result, elem);
+            };
         
         while (scope !== null) {
-            for (i = 0; i < this[prop].length; i++) {
-                result = add(result, this[prop][i]);
-            }
+            this[prop].forEach(combine);
             scope = scope.parent;
         }
         
         return result;
-    };
-    
-    /**
-     * Traverse identifier declarations in the scope up via the parent
-     */
-    Scope.prototype.walkUpDeclarations = function (add, init) {
-        return this.walkUp(add, init, 'idDeclarations');
-    };
-    
-    /**
-     * Traverse identifier occurrences in the scope up via the parent
-     */
-    Scope.prototype.walkUpIdentifiers = function (add, init) {
-        return this.walkUp(add, init, 'idOccurrences');
-    };
-
-    /**
-     * Traverse property occurrences in the scope up via the parent
-     */
-    Scope.prototype.walkUpProperties = function (add, init) {
-        return this.walkUp(add, init, 'propOccurrences');
-    };
-
-    /**
-     * Traverse associations in the scope up via the parent
-     */
-    Scope.prototype.walkUpAssociations = function (add, init) {
-        return this.walkUp(add, init, 'associations');
-    };
-    
-    /**
-     * Traverse literal occurrences in the scope up via the parent
-     */
-    Scope.prototype.walkUpLiterals = function (add, init) {
-        return this.walkUp(add, init, 'literals');
-    };
-    
-    /**
-     * Return a string representations of declarations below this scope
-     */
-    Scope.prototype.toStringBelow = function () {
-        return "[" + this.range.start + " " + this.idDeclarations.map(function (i) {
-            return i.name;
-        }).join(", ") +
-            " : " + (this.children.map(function (c) {
-                return c.toString();
-            }).join("; ")) + this.range.end + "]";
-    };
-
-    /**
-     * Return a string representations of declarations in this scope
-     */
-    Scope.prototype.toString = function () {
-        return "[" + this.range.start + " " + this.idDeclarations.map(function (i) {
-            return i.name;
-        }).join(", ") + this.range.end + "]";
     };
 
     module.exports = Scope;

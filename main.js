@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Adobe Systems Incorporated. All rights reserved.
+ * Copyright (c) 2013 Adobe Systems Incorporated. All rights reserved.
  *  
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"), 
@@ -48,6 +48,10 @@ define(function (require, exports, module) {
      * Creates a hint response object. Filters the hint list using the query
      * string, formats the hints for display, and returns a hint response
      * object according to the CodeHintManager's API for code hint providers.
+     *
+     * @param {Array.<Object>} hints - hints to be included in the response
+     * @param {string} query - querystring with which to filter the hint list
+     * @return {Object} - hint response as defined by the CodeHintManager API 
      */
     function getHintResponse(hints, query) {
 
@@ -56,13 +60,23 @@ define(function (require, exports, module) {
             formattedHints;
 
         /*
-         * Filter a list of tokens using a given query string
+         * Filter a list of tokens using the query string in the closure.
+         * 
+         * @param {Array.<Object>} tokens - list of hints to filter
+         * @param {number} limit - maximum numberof tokens to return
+         * @return {Array.<Object>} - filtered list of hints
          */
         function filterWithQuery(tokens, limit) {
 
             /*
              * Filter arr using test, returning at most limit results from the
              * front of the array.
+             * 
+             * @param {Array} arr - array to filter
+             * @param {Function} test - test to determine if an element should
+             *      be included in the results
+             * @param {number} limit - the maximum number of elements to return
+             * @return {Array.<Object>} - new array of filtered elements
              */
             function filterArrayPrefix(arr, test, limit) {
                 var i = 0,
@@ -107,7 +121,14 @@ define(function (require, exports, module) {
         }
 
         /*
-         * Returns a formatted list of hints with the query substring highlighted
+         * Returns a formatted list of hints with the query substring
+         * highlighted.
+         * 
+         * @param {Array.<Object>} hints - the list of hints to format
+         * @param {string} query - querystring used for highlighting matched
+         *      poritions of each hint
+         * @param {Array.<jQuery.Object>} - array of hints formatted as jQuery
+         *      objects
          */
         function formatHints(hints, query) {
             return hints.map(function (token) {
@@ -197,16 +218,20 @@ define(function (require, exports, module) {
 
     /**
      * Determine whether hints are available for a given editor context
+     * 
+     * @param {Editor} editor - the current editor context
+     * @param {string} key - charCode of the last pressed key
+     * @return {boolean} - can the provider provide hints for this session?
      */
     JSHints.prototype.hasHints = function (editor, key) {
-        if ((key === null) || HintUtils.maybeIdentifier(key)) {
+        if (session && ((key === null) || HintUtils.maybeIdentifier(key))) {
             var cursor  = session.getCursor(),
                 token   = session.getToken(cursor);
 
             // don't autocomplete within strings or comments, etc.
             if (token && HintUtils.hintable(token)) {
                 var offset = session.getOffset();
-                
+
                 // Invalidate cached information if: 1) no scope exists; 2) the
                 // cursor has moved a line; 3) the scope is dirty; or 4) if the
                 // cursor has moved into a different scope. Cached information
@@ -228,13 +253,16 @@ define(function (require, exports, module) {
     /** 
       * Return a list of hints, possibly deferred, for the current editor 
       * context
+      * 
+      * @param {string} key - charCode of the last pressed key
+      * @return {Object + jQuery.Deferred} - hint response (immediate or
+      *     deferred) as defined by the CodeHintManager API
       */
     JSHints.prototype.getHints = function (key) {
         var cursor = session.getCursor(),
             token = session.getToken(cursor);
-        if ((key === null) || HintUtils.maybeIdentifier(token.string)) {
-            if (token && HintUtils.hintable(token)) {
-
+        if ((key === null) || HintUtils.hintable(token)) {
+            if (token) {
                 if (!cachedScope) {
                     var offset          = session.getOffset(),
                         scopeResponse   = ScopeManager.getScopeInfo(session.editor.document, offset),
@@ -294,9 +322,11 @@ define(function (require, exports, module) {
     };
 
     /**
-     * Enters the code completion text into the editor
+     * Inserts the hint selected by the user into the current editor.
      * 
-     * @param {string} hint - text to insert into current code editor
+     * @param {jQuery.Object} hint - hint object to insert into current editor
+     * @return {boolean} - should a new hinting session be requested 
+     *      immediately after insertion?
      */
     JSHints.prototype.insertHint = function ($hintObj) {
         var hint        = $hintObj.data("token"),
@@ -349,35 +379,43 @@ define(function (require, exports, module) {
         /*
          * When the editor is changed, reset the hinting session and cached 
          * information, and reject any pending deferred requests.
+         * 
+         * @param {Editor} editor - editor context to be initialized.
          */
         function initializeSession(editor) {
             ScopeManager.handleEditorChange(editor.document);
             session = new Session(editor);
-            cachedScope = null;
-            cachedLine = null;
-            cachedHints = null;
-            cachedType = null;
         }
 
         /*
          * Install editor change listeners
+         * 
+         * @param {Editor} editor - editor context on which to listen for
+         *      changes
          */
         function installEditorListeners(editor) {
-            if (!editor) {
-                return;
-            }
-            
-            if (editor.getModeForSelection() === HintUtils.MODE_NAME) {
+            // always clean up cached scope and hint info
+            cachedScope = null;
+            cachedLine = null;
+            cachedHints = null;
+            cachedType = null;
+
+            if (editor && editor.getLanguageForSelection().getId() === HintUtils.LANGUAGE_ID) {
                 initializeSession(editor);
                 $(editor)
                     .on(HintUtils.eventName("change"), function () {
                         ScopeManager.handleFileChange(editor.document);
                     });
+            } else {
+                session = null;
             }
         }
 
         /*
          * Uninstall editor change listeners
+         * 
+         * @param {Editor} editor - editor context on which to stop listening
+         *      for changes
          */
         function uninstallEditorListeners(editor) {
             $(editor)
@@ -388,6 +426,10 @@ define(function (require, exports, module) {
          * Handle the activeEditorChange event fired by EditorManager.
          * Uninstalls the change listener on the previous editor
          * and installs a change listener on the new editor.
+         * 
+         * @param {Event} event - editor change event (ignored)
+         * @param {Editor} current - the new current editor context
+         * @param {Editor} previous - the previous editor context
          */
         function handleActiveEditorChange(event, current, previous) {
             uninstallEditorListeners(previous);
@@ -405,7 +447,7 @@ define(function (require, exports, module) {
         installEditorListeners(EditorManager.getActiveEditor());
 
         var jsHints = new JSHints();
-        CodeHintManager.registerHintProvider(jsHints, [HintUtils.MODE_NAME], 0);
+        CodeHintManager.registerHintProvider(jsHints, [HintUtils.LANGUAGE_ID], 0);
 
         // for unit testing
         exports.jsHintProvider = jsHints;
