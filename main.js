@@ -447,7 +447,7 @@ define(function (require, exports, module) {
         installEditorListeners(EditorManager.getActiveEditor());
 
         var jsHints = new JSHints();
-        CodeHintManager.registerHintProvider(jsHints, [HintUtils.LANGUAGE_ID], 0);
+        CodeHintManager.registerHintProvider(jsHints, [HintUtils.LANGUAGE_ID], 1);
 
         // for unit testing
         exports.jsHintProvider = jsHints;
