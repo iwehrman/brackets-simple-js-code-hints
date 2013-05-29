@@ -1,0 +1,12 @@
+{
+    "name": "brackets-simple-js-code-hints",
+    "description": "Brackets extension to that provides simple code hints. No type inference here, friends!",
+    "version": "1.0.0",
+    "keywords": [".js"],
+    "homepage": "https://github.com/iwehrman/brackets-simple-js-code-hints",
+    "bugs": "https://github.com/iwehrman/brackets-simple-js-code-hints/issues",
+    "repository" : { 
+        "type" : "git",
+         "url": "https://github.com/iwehrman/brackets-simple-js-code-hints.git"
+    }
+}
