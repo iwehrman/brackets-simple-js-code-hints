@@ -1,5 +1,6 @@
 {
-    "name": "brackets-simple-js-code-hints",
+    "name": "Simple JS Code Hints",
+    "author" : "Ian Wehrman <ian@wehrman.org>",
     "description": "Brackets extension to that provides simple code hints. No type inference here, friends!",
     "version": "1.0.0",
     "keywords": [".js"],
