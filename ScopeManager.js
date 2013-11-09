@@ -37,7 +37,7 @@ define(function (require, exports, module) {
     var DocumentManager     = brackets.getModule("document/DocumentManager"),
         LanguageManager     = brackets.getModule("language/LanguageManager"),
         FileUtils           = brackets.getModule("file/FileUtils"),
-        NativeFileSystem    = brackets.getModule("file/NativeFileSystem").NativeFileSystem,
+        FileSystem          = brackets.getModule("filesystem/FileSystem"),
         ProjectManager      = brackets.getModule("project/ProjectManager"),
         HintUtils           = require("HintUtils"),
         Scope               = require("Scope");
@@ -141,8 +141,7 @@ define(function (require, exports, module) {
         // we might need to update the outer scope
         if (state.scope === null || state.dirtyFile) {
             if (!state.active) {
-                var path    = dir + file,
-                    entry   = new NativeFileSystem.FileEntry(path);
+                var path = dir + file;
                 
                 // the outer scope worker is about to be active
                 state.active = true;
@@ -427,12 +426,18 @@ define(function (require, exports, module) {
             dir         = split.dir,
             file        = split.file;
 
-        NativeFileSystem.resolveNativeFileSystemPath(dir, function (dirEntry) {
-            var reader = dirEntry.createReader();
+        FileSystem.resolve(dir, function (err, dirEntry) {
+            if (err) {
+                return;
+            }
 
             markFileDirty(dir, file);
 
-            reader.readEntries(function (entries) {
+            dirEntry.getContents(function (err, entries) {
+                if (err) {
+                    return;
+                }
+                
                 entries.slice(0, MAX_FILES_IN_DIR).forEach(function (entry) {
                     if (entry.isFile) {
                         var path    = entry.fullPath,
@@ -440,7 +445,7 @@ define(function (require, exports, module) {
                             dir     = split.dir,
                             file    = split.file;
                         
-                        if (file.indexOf(".") > 1) { // ignore /.dotfiles
+                        if (file.indexOf(".") !== 0) { // ignore /.dotfiles
                             var languageID = LanguageManager.getLanguageForPath(entry.fullPath).getId();
                             if (languageID === HintUtils.LANGUAGE_ID) {
                                 DocumentManager.getDocumentForPath(path).done(function (document) {
@@ -454,8 +459,6 @@ define(function (require, exports, module) {
                 console.log("Unable to refresh directory: " + err);
                 refreshOuterScope(dir, file, document.getText());
             });
-        }, function (err) {
-            console.log("Directory \"%s\" does not exist", dir);
         });
     }
 
